@@ -88,7 +88,7 @@ impl IServiceProvider for ServiceProvider {
         match self.map.get(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::Factory(x)) => 
             x.downcast_ref::<ServiceFactory<T>>()
-                .map(|fun| (fun.factory)(self)).unwrap(),
+                .map(|fun| (fun.factory)(self)).flatten(),
             Some(ServiceDescriptor::Clone(x)) => 
             x.downcast_ref::<CloneServiceFactory<T>>()
                 .map(|fun| (fun.factory)(fun)),
