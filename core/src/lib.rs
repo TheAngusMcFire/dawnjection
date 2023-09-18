@@ -137,7 +137,7 @@ mod tests {
         collection.reg_mutable_singleton(42_u32);
         collection.reg_factory(|x| {
             let int = x.try_get_mut::<u32>().unwrap();
-            (*int) as i32
+            Some((*int) as i32)
         });
         let pro = collection.build_service_provider();
         assert_eq!(pro.try_get::<i32>(), Some(42));
