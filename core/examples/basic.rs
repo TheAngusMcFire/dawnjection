@@ -7,6 +7,12 @@ struct SomeService {
     some_handle : usize
 }
 
+impl Drop for SomeService {
+    fn drop(&mut self) {
+        println!("dropped {}", self.some_handle)
+    }
+}
+
 #[derive(Default)]
 struct SomePool {
     pub insts : Arc<Mutex<Vec<SomeService>>>
@@ -29,7 +35,7 @@ fn main() {
 
     let sp = sc.build_service_provider();
 
-    for _ in 0..20 {
+    for _ in 0..1 {
         println!("{:?}", sp.try_get::<SomeService>().unwrap());
     }
 
