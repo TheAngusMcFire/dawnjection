@@ -90,6 +90,22 @@ pub struct ServiceProvider {
     scope_context: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>
 }
 
+impl ServiceProvider {
+    fn create_scope(&self) -> Self {
+        if self.scope_context.is_some() {
+            ServiceProvider{
+                map: self.map.clone(),
+                scope_context: self.scope_context.clone()
+            }
+        } else {
+            ServiceProvider{
+                map: self.map.clone(),
+                scope_context: Some(Arc::new(Mutex::new(HashMap::<std::any::TypeId, ServiceDescriptor>::new())))
+            }
+        }
+    }
+}
+
 impl IServiceProvider for ServiceProvider {
 
     fn try_take<T: 'static>(&self) -> Option<T> {
