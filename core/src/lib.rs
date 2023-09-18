@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 
 struct ServiceFactory<T> {
-    pub factory: fn(&ServiceProvider) -> T,
+    pub factory: fn(&ServiceProvider) -> Option<T>,
 }
 
 
@@ -60,7 +60,7 @@ impl ServiceCollection {
         self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::MutableSingleton(Box::new(Arc::new(Mutex::new(instance)))));
     }
 
-    pub fn reg_factory<T: 'static + Sync + Send>(&mut self, factory: fn(&ServiceProvider) -> T) {
+    pub fn reg_factory<T: 'static + Sync + Send>(&mut self, factory: fn(&ServiceProvider) -> Option<T>) {
         self.check_if_already_registered::<T>();
         self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Factory(Box::new(ServiceFactory { factory })));
     }
@@ -88,7 +88,7 @@ impl IServiceProvider for ServiceProvider {
         match self.map.get(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::Factory(x)) => 
             x.downcast_ref::<ServiceFactory<T>>()
-                .map(|fun| (fun.factory)(self)),
+                .map(|fun| (fun.factory)(self)).unwrap(),
             Some(ServiceDescriptor::Clone(x)) => 
             x.downcast_ref::<CloneServiceFactory<T>>()
                 .map(|fun| (fun.factory)(fun)),
