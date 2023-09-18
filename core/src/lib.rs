@@ -24,6 +24,8 @@ enum ServiceDescriptor {
     Clone(Box<dyn Any + Sync + Send>),
     // factory to create specific object instances
     Factory(Box<dyn Any + Sync + Send>),
+    // one shot consumable, e.g. some scoped context object
+    Take(Box<dyn Any + Sync + Send>),
 }
 
 
@@ -67,25 +69,55 @@ impl ServiceCollection {
 
     pub fn build_service_provider(self) -> ServiceProvider {
         ServiceProvider {
-            map: self.map
+            map: Arc::new(self.map),
+            /* root provider does not have a scope */
+            scope_context: None
         }
     }
 }
 
 
 pub trait IServiceProvider {
+    /* one shot function to move entry from di scope */
+    fn try_take<T: 'static>(&self) -> Option<T>;
     fn try_get<T: 'static>(&self) -> Option<T>;
     fn try_get_ref<T: 'static>(&self) -> Option<&T>;
     fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>>;
 }
 
 pub struct ServiceProvider {
-    map: HashMap<std::any::TypeId, ServiceDescriptor>,
+    map: Arc<HashMap<std::any::TypeId, ServiceDescriptor>>,
+    scope_context: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>
 }
 
 impl IServiceProvider for ServiceProvider {
+
+    fn try_take<T: 'static>(&self) -> Option<T> {
+
+        if self.scope_context.is_none() {
+            return None;
+        }
+
+        let mut scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
+        
+        match scope_map.get(&TypeId::of::<T>()) {
+            Some(ServiceDescriptor::Take(_)) => {},
+            _ => return None
+        }
+        
+        match scope_map.remove(&TypeId::of::<T>()) {
+            Some(ServiceDescriptor::Take(taken)) => {
+                match taken.downcast::<T>() {
+                    Ok(x) => Some(*x),
+                    _ => None
+                }
+            }
+            _ => None
+        }
+    }
+
     fn try_get<T: 'static>(&self) -> Option<T> {
-        match self.map.get(&TypeId::of::<T>()) {
+        let def = match self.map.get(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::Factory(x)) => 
             x.downcast_ref::<ServiceFactory<T>>()
                 .map(|fun| (fun.factory)(self)).flatten(),
@@ -93,6 +125,31 @@ impl IServiceProvider for ServiceProvider {
             x.downcast_ref::<CloneServiceFactory<T>>()
                 .map(|fun| (fun.factory)(fun)),
             _ => None
+        };
+
+        if def.is_some() {
+            return def;
+        }
+
+        if self.scope_context.is_none() {
+            return None;
+        }
+
+        if let Some(x) = self.try_take() {
+            return Some(x);
+        }
+
+        {
+            let scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
+            match scope_map.get(&TypeId::of::<T>()) {
+                Some(ServiceDescriptor::Factory(x)) => 
+                x.downcast_ref::<ServiceFactory<T>>()
+                    .map(|fun| (fun.factory)(self)).flatten(),
+                Some(ServiceDescriptor::Clone(x)) => 
+                x.downcast_ref::<CloneServiceFactory<T>>()
+                    .map(|fun| (fun.factory)(fun)),
+                _ => None
+            }
         }
     }
 
