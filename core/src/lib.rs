@@ -86,9 +86,11 @@ pub struct ServiceProvider {
 impl IServiceProvider for ServiceProvider {
     fn try_get<T: 'static>(&self) -> Option<T> {
         match self.map.get(&TypeId::of::<T>()) {
-            Some(ServiceDescriptor::Factory(x)) => x.downcast_ref::<ServiceFactory<T>>()
+            Some(ServiceDescriptor::Factory(x)) => 
+            x.downcast_ref::<ServiceFactory<T>>()
                 .map(|fun| (fun.factory)(self)),
-            Some(ServiceDescriptor::Clone(x)) => x.downcast_ref::<CloneServiceFactory<T>>()
+            Some(ServiceDescriptor::Clone(x)) => 
+            x.downcast_ref::<CloneServiceFactory<T>>()
                 .map(|fun| (fun.factory)(fun)),
             _ => None
         }
@@ -104,7 +106,8 @@ impl IServiceProvider for ServiceProvider {
 
     fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>> {
         match self.map.get(&TypeId::of::<T>()) {
-            Some(ServiceDescriptor::MutableSingleton(x)) => if let Some(x) = x.downcast_ref::<Arc<Mutex<T>>>() {
+            Some(ServiceDescriptor::MutableSingleton(x)) => 
+            if let Some(x) = x.downcast_ref::<Arc<Mutex<T>>>() {
                 // not sure what the correct handling of this is
                 match x.lock() {
                     Ok(x) => Some(x),
