@@ -67,6 +67,11 @@ impl ServiceCollection {
         self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Factory(Box::new(ServiceFactory { factory })));
     }
 
+    pub fn reg_takeable<T:  Sync + Send>(&mut self, instance: T) where T: 'static {
+        self.check_if_already_registered::<T>();
+        self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Take(Box::new(instance)));
+    }
+
     pub fn build_service_provider(self) -> ServiceProvider {
         ServiceProvider {
             map: Arc::new(self.map),
@@ -74,6 +79,11 @@ impl ServiceCollection {
             scope_context: None
         }
     }
+
+    pub (crate) fn get_service_map(self) -> HashMap<std::any::TypeId, ServiceDescriptor> {
+        self.map
+    }
+
 }
 
 
@@ -91,17 +101,15 @@ pub struct ServiceProvider {
 }
 
 impl ServiceProvider {
-    fn create_scope(&self) -> Self {
-        if self.scope_context.is_some() {
-            ServiceProvider{
-                map: self.map.clone(),
-                scope_context: self.scope_context.clone()
-            }
-        } else {
-            ServiceProvider{
-                map: self.map.clone(),
-                scope_context: Some(Arc::new(Mutex::new(HashMap::<std::any::TypeId, ServiceDescriptor>::new())))
-            }
+    pub fn create_scope(&self, scope_seed: Option<ServiceCollection>) -> Self {
+        let scope_ctx = match scope_seed {
+            Some(x) => x.get_service_map(),
+            None => HashMap::new()
+        };
+
+        ServiceProvider {
+            map: self.map.clone(),
+            scope_context: Some(Arc::new(Mutex::new(scope_ctx)))
         }
     }
 }
@@ -244,5 +252,20 @@ mod tests {
         let mut collection = ServiceCollection::default();
         collection.reg_mutable_singleton(42_i32);
         collection.reg_mutable_singleton(42_i32);
+    }
+
+    #[test]
+    fn scope_test() {
+        let test_string = "some string takeable";
+        let mut collection = ServiceCollection::default();
+        collection.reg_mutable_singleton(42_i32);
+        let root_sc = collection.build_service_provider();
+        let mut scope_collection = ServiceCollection::default();
+        scope_collection.reg_takeable(format!("{}", test_string));
+        scope_collection.reg_takeable(1234u64);
+        let scope_sp = root_sc.create_scope(Some(scope_collection));
+        let some_string = scope_sp.try_get::<String>();
+        assert_eq!(some_string, Some(format!("{}", test_string)));
+        assert_eq!(scope_sp.try_take(), Some(1234u64));
     }
 }
