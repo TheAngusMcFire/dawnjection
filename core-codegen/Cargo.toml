@@ -11,5 +11,6 @@ proc-macro = true
 [dependencies]
 syn = { version = "1.0.82", features = ["full", "extra-traits"] }
 quote = "1.0.10"
+dawnjection-codegen-lib = {path = "../core-codegen-lib"}
 
 [dev-dependencies]

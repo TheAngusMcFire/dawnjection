@@ -1,5 +1,7 @@
 [workspace]
 
+resolver = "2"
+
 members = [
-    "core", "core-codegen"
+    "core", "core-codegen", "core-codegen-lib"
 ]
