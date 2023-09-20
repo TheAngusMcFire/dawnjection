@@ -100,7 +100,7 @@ pub fn consumer_with_di(ast: ItemFn) -> TokenStream {
         #ast
         use std::sync::Arc;
         use dawnjection::IServiceProvider;
-        #is_async fn #f_name_new(service_provider: std::sync::Arc<dawnjection::ServiceProvider>) #ret {
+        #is_async fn #f_name_new(service_provider: &dawnjection::ServiceProvider) #ret {
             #(#idents)*
             #f_name(#(#var_names,)*)#fn_await
         }

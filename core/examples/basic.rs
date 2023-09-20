@@ -20,7 +20,7 @@ struct SomePool {
 
 
 fn main() {
-    let mut sc = ServiceCollection::default()
+    let sc = ServiceCollection::default()
         .reg_singleton(SomePool::default())
         .reg_factory(|sp| {
         let pool = sp.try_get_ref::<SomePool>().unwrap();

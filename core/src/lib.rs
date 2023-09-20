@@ -85,6 +85,11 @@ impl ServiceCollection {
         }
     }
 
+    pub fn build_service_provider_arc(self) -> Arc<ServiceProvider> {
+        Arc::new(self.build_service_provider())
+    }
+
+
     pub (crate) fn get_service_map(self) -> HashMap<std::any::TypeId, ServiceDescriptor> {
         self.map
     }
@@ -211,7 +216,7 @@ mod tests {
 
     #[test]
     fn basic_clone() {
-        let mut collection = ServiceCollection::default();
+        let collection = ServiceCollection::default();
         let pro = collection
             .reg_cloneable(42_i32)
             .build_service_provider();
