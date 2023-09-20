@@ -122,6 +122,10 @@ impl ServiceProvider {
             scope_context: Some(Arc::new(Mutex::new(scope_ctx)))
         }
     }
+
+    pub fn create_scope_arc(&self, scope_seed: Option<ServiceCollection>) -> Arc<Self> {
+        self.create_scope(scope_seed).into()
+    }
 }
 
 impl IServiceProvider for ServiceProvider {

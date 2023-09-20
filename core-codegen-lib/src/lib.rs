@@ -97,6 +97,7 @@ pub fn consumer_with_di(ast: ItemFn) -> TokenStream {
     let fn_await = is_async.map(|_| quote!(.await));
 
     let fin = quote!{
+        #[allow(dead_code)]
         #ast
         use std::sync::Arc;
         use dawnjection::IServiceProvider;
