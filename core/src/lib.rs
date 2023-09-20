@@ -39,7 +39,7 @@ impl ServiceCollection {
     fn check_if_already_registered<T: 'static>(&self) {
         if self.map.contains_key(&TypeId::of::<T>()) { panic!() }
     }
-    pub fn reg_cloneable<T: Sync + Send>(&mut self, instance: T) where T: Clone + 'static {
+    pub fn reg_cloneable<T: Sync + Send>(mut self, instance: T) -> Self where T: Clone + 'static {
         self.check_if_already_registered::<T>();
 
         let csf = CloneServiceFactory {
@@ -50,26 +50,31 @@ impl ServiceCollection {
         };
 
         self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Clone(Box::new(csf)));
+        self
     }
 
-    pub fn reg_singleton<T:  Sync + Send>(&mut self, instance: T) where T: 'static {
+    pub fn reg_singleton<T:  Sync + Send>(mut self, instance: T) -> Self where T: 'static {
         self.check_if_already_registered::<T>();
         self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Singleton(Box::new(instance)));
+        self
     }
 
-    pub fn reg_mutable_singleton<T:  Sync + Send>(&mut self, instance: T) where T: 'static {
+    pub fn reg_mutable_singleton<T:  Sync + Send>(mut self, instance: T) -> Self where T: 'static {
         self.check_if_already_registered::<T>();
         self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::MutableSingleton(Box::new(Arc::new(Mutex::new(instance)))));
+        self
     }
 
-    pub fn reg_factory<T: 'static + Sync + Send>(&mut self, factory: fn(&ServiceProvider) -> Option<T>) {
+    pub fn reg_factory<T: 'static + Sync + Send>(mut self, factory: fn(&ServiceProvider) -> Option<T>) -> Self {
         self.check_if_already_registered::<T>();
         self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Factory(Box::new(ServiceFactory { factory })));
+        self
     }
 
-    pub fn reg_takeable<T:  Sync + Send>(&mut self, instance: T) where T: 'static {
+    pub fn reg_takeable<T:  Sync + Send>(mut self, instance: T) -> Self where T: 'static {
         self.check_if_already_registered::<T>();
         self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Take(Box::new(instance)));
+        self
     }
 
     pub fn build_service_provider(self) -> ServiceProvider {
@@ -207,36 +212,37 @@ mod tests {
     #[test]
     fn basic_clone() {
         let mut collection = ServiceCollection::default();
-        collection.reg_cloneable(42_i32);
-        let pro = collection.build_service_provider();
+        let pro = collection
+            .reg_cloneable(42_i32)
+            .build_service_provider();
         assert_eq!(pro.try_get::<i32>(), Some(42));
     }
 
     #[test]
     fn basic_factory() {
-        let mut collection = ServiceCollection::default();
-        collection.reg_mutable_singleton(42_u32);
-        collection.reg_factory(|x| {
+        let pro = ServiceCollection::default()
+            .reg_mutable_singleton(42_u32)
+            .reg_factory(|x| {
             let int = x.try_get_mut::<u32>().unwrap();
             Some((*int) as i32)
-        });
-        let pro = collection.build_service_provider();
+        }).build_service_provider();
         assert_eq!(pro.try_get::<i32>(), Some(42));
     }
 
     #[test]
     fn basic_singleton() {
-        let mut collection = ServiceCollection::default();
-        collection.reg_singleton(42_i32);
-        let pro = collection.build_service_provider();
+        let pro = ServiceCollection::default()
+            .reg_singleton(42_i32
+            ).build_service_provider();
         assert_eq!(pro.try_get_ref::<i32>(), Some(&42))
     }
 
     #[test]
     fn basic_mutable_singleton() {
-        let mut collection = ServiceCollection::default();
-        collection.reg_mutable_singleton(42_i32);
-        let pro = collection.build_service_provider();
+        let pro = ServiceCollection::default()
+            .reg_mutable_singleton(42_i32)
+            .build_service_provider();
+
         {
             let mut some = pro.try_get_mut::<i32>().unwrap();
             *some += 1;
@@ -249,20 +255,20 @@ mod tests {
     #[test]
     #[should_panic]
     fn double_reg_test() {
-        let mut collection = ServiceCollection::default();
-        collection.reg_mutable_singleton(42_i32);
-        collection.reg_mutable_singleton(42_i32);
+        let _ = ServiceCollection::default()
+            .reg_mutable_singleton(42_i32)
+            .reg_mutable_singleton(42_i32);
     }
 
     #[test]
     fn scope_test() {
         let test_string = "some string takeable";
-        let mut collection = ServiceCollection::default();
-        collection.reg_mutable_singleton(42_i32);
-        let root_sc = collection.build_service_provider();
-        let mut scope_collection = ServiceCollection::default();
-        scope_collection.reg_takeable(format!("{}", test_string));
-        scope_collection.reg_takeable(1234u64);
+        let root_sc = ServiceCollection::default()
+            .reg_mutable_singleton(42_i32)
+            .build_service_provider();
+        let scope_collection = ServiceCollection::default()
+            .reg_takeable(format!("{}", test_string))
+            .reg_takeable(1234u64);
         let scope_sp = root_sc.create_scope(Some(scope_collection));
         let some_string = scope_sp.try_get::<String>();
         assert_eq!(some_string, Some(format!("{}", test_string)));

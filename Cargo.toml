@@ -3,5 +3,5 @@
 resolver = "2"
 
 members = [
-    "core", "core-codegen", "core-codegen-lib"
+    "core", "core-codegen", "core-codegen-lib", "tests"
 ]
