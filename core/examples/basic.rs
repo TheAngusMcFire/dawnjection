@@ -29,7 +29,7 @@ fn main() {
         let ninst = SomeService {some_handle: insts.len()};
         insts.push(ninst.clone());
 
-        return Some(ninst);
+        Some(ninst)
     });
 
     let sp = sc.build_service_provider();

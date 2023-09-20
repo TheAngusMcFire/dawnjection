@@ -128,9 +128,7 @@ impl IServiceProvider for ServiceProvider {
 
     fn try_take<T: 'static>(&self) -> Option<T> {
 
-        if self.scope_context.is_none() {
-            return None;
-        }
+        self.scope_context.as_ref()?;
 
         let mut scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
         
@@ -154,7 +152,7 @@ impl IServiceProvider for ServiceProvider {
         let def = match self.map.get(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::Factory(x)) => 
             x.downcast_ref::<ServiceFactory<T>>()
-                .map(|fun| (fun.factory)(self)).flatten(),
+                .and_then(|fun| (fun.factory)(self)),
             Some(ServiceDescriptor::Clone(x)) => 
             x.downcast_ref::<CloneServiceFactory<T>>()
                 .map(|fun| (fun.factory)(fun)),
@@ -165,9 +163,7 @@ impl IServiceProvider for ServiceProvider {
             return def;
         }
 
-        if self.scope_context.is_none() {
-            return None;
-        }
+        self.scope_context.as_ref()?;
 
         if let Some(x) = self.try_take() {
             return Some(x);
@@ -178,7 +174,7 @@ impl IServiceProvider for ServiceProvider {
             match scope_map.get(&TypeId::of::<T>()) {
                 Some(ServiceDescriptor::Factory(x)) => 
                 x.downcast_ref::<ServiceFactory<T>>()
-                    .map(|fun| (fun.factory)(self)).flatten(),
+                    .and_then(|fun| (fun.factory)(self)),
                 Some(ServiceDescriptor::Clone(x)) => 
                 x.downcast_ref::<CloneServiceFactory<T>>()
                     .map(|fun| (fun.factory)(fun)),
@@ -272,11 +268,11 @@ mod tests {
             .reg_mutable_singleton(42_i32)
             .build_service_provider();
         let scope_collection = ServiceCollection::default()
-            .reg_takeable(format!("{}", test_string))
+            .reg_takeable(test_string.to_string())
             .reg_takeable(1234u64);
         let scope_sp = root_sc.create_scope(Some(scope_collection));
         let some_string = scope_sp.try_get::<String>();
-        assert_eq!(some_string, Some(format!("{}", test_string)));
+        assert_eq!(some_string, Some(test_string.to_string()));
         assert_eq!(scope_sp.try_take(), Some(1234u64));
     }
 }

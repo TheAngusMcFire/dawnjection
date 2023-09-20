@@ -107,7 +107,7 @@ pub fn consumer_with_di(ast: ItemFn) -> TokenStream {
 
     };
 
-    fin.into()
+    fin
 }
 
 #[cfg(test)]
@@ -120,7 +120,7 @@ mod tests {
             Ok(())
         });
 
-        let ast = syn::parse2(ts.into()).unwrap();
+        let ast = syn::parse2(ts).unwrap();
         let ret = crate::consumer_with_di(ast);
         std::fs::write("/tmp/test.rs", format!("{}", ret)).unwrap();
     }

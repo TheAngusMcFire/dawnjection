@@ -20,7 +20,7 @@ fn di_codegen_int_tes () {
     use dawnjection::ServiceCollection;
 
     let pro = ServiceCollection::default()
-    .reg_cloneable(format!("this is a test"))
+    .reg_cloneable("this is a test".to_string())
     .reg_singleton(SomeStruct {}).reg_takeable(123)
     .build_service_provider_arc();
 
