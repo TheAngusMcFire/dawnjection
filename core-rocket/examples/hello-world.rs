@@ -13,7 +13,7 @@ fn hello(msg: R<String>, number: I<u32>) -> String {
 #[launch]
 fn rocket() -> _ {
     let sc = ServiceCollection::default()
-        .reg_singleton(format!("Hello world"))
+        .reg_singleton("Hello world".to_string())
         .reg_singleton(AtomicU32::new(0))
         .reg_mutable_singleton(2i32)
         .reg_factory(|x| {
