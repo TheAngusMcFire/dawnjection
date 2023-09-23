@@ -1,9 +1,7 @@
 use std::sync::atomic::AtomicU32;
 use dawnjection::{ServiceCollection,IServiceProvider};
 use dawnjection_rocket::{I,R};
-
-
-#[macro_use] extern crate rocket;
+use rocket::{get, launch, routes};
 
 #[get("/")]
 fn hello(msg: R<String>, number: I<u32>) -> String {

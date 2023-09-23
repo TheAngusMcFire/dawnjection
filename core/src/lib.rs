@@ -4,6 +4,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 
+pub type Report = eyre::Report;
+pub type BoxFuture<'r, T = Result<(), Report>> = futures::future::BoxFuture<'r, T>;
+#[allow(dead_code)]
+pub struct HandlerEntry {
+    pub handler:  fn(sp: Arc<ServiceProvider>) -> BoxFuture<'static>,
+    pub name: String
+}
+
 struct ServiceFactory<T> {
     pub factory: fn(&ServiceProvider) -> Option<T>,
 }

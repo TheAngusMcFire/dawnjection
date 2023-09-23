@@ -1,6 +1,9 @@
+use proc_macro2::Ident;
 use proc_macro2::TokenStream;
 use quote::format_ident;
 use quote::quote;
+use syn::ReturnType;
+use syn::token::Async;
 use syn::{FnArg, GenericArgument, ItemFn, Pat, PathArguments, Type, TypePath};
 
 #[allow(dead_code)]
@@ -65,12 +68,12 @@ fn process_segments(ty: &mut String, x: &&TypePath) {
     }
 }
 
-pub fn consumer_with_di(ast: ItemFn) -> TokenStream {
+pub fn with_di(ast: ItemFn, for_handler: bool) -> TokenStream {
     let is_async = ast.sig.asyncness;
     let args = get_args_from_function(&ast.sig);
     let mut var_names = Vec::<syn::Ident>::new();
 
-    let idents = args.iter().enumerate().map(|(i, x)| {
+    let injection_vars = args.iter().enumerate().map(|(i, x)| {
         let ty : syn::Type = syn::parse_str(&x.ty).unwrap();
         let varident = format_ident!("var{i}");
 
@@ -96,19 +99,59 @@ pub fn consumer_with_di(ast: ItemFn) -> TokenStream {
     let f_name_new = format_ident!("{}_di", ident.to_string());
     let fn_await = is_async.map(|_| quote!(.await));
 
-    let fin = quote!{
+    if for_handler {
+        codegen_handler_with_di(&ast, f_name, quote!(#(#injection_vars)*), fn_await, var_names)
+    } else { 
+        codegen_with_di(is_async, &ast, f_name, f_name_new, quote!(#(#injection_vars)*), fn_await, ret, var_names)
+    }
+}
+
+
+fn codegen_with_di(is_async: Option<Async>, ast: &ItemFn, 
+    f_name: Ident, f_name_new: Ident, 
+    injection_vars: TokenStream, 
+    fn_await: Option<TokenStream>, ret: &ReturnType, var_names: Vec<Ident>) -> TokenStream{
+    quote!{
         #[allow(dead_code)]
         #ast
-        use std::sync::Arc;
         use dawnjection::IServiceProvider;
         #is_async fn #f_name_new(service_provider: &dawnjection::ServiceProvider) #ret {
-            #(#idents)*
+            #injection_vars
             #f_name(#(#var_names,)*)#fn_await
         }
 
-    };
+    }
+}
 
-    fin
+fn codegen_handler_with_di(ast: &ItemFn, 
+    f_name: Ident, 
+    injection_vars: TokenStream, 
+    fn_await: Option<TokenStream>, var_names: Vec<Ident>) -> TokenStream{
+    quote!{
+        #[allow(dead_code)]
+        #ast
+
+        #[derive(Default)]
+        struct #f_name {}
+        
+        impl #f_name {
+            fn consumer_entry(self) -> dawnjection::HandlerEntry {
+                use dawnjection::IServiceProvider;
+                fn mf(service_provider: std::sync::Arc<dawnjection::ServiceProvider>) -> dawnjection::BoxFuture<'static> {
+
+                    Box::pin(async move {
+                        #injection_vars
+                        #f_name(#(#var_names,)*)#fn_await
+                    })
+                }
+
+                dawnjection::HandlerEntry {
+                    handler: mf,
+                    name: stringify!(#f_name).to_string()
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -122,7 +165,7 @@ mod tests {
         });
 
         let ast = syn::parse2(ts).unwrap();
-        let ret = crate::consumer_with_di(ast);
+        let ret = crate::with_di(ast, true);
         std::fs::write("/tmp/test.rs", format!("{}", ret)).unwrap();
     }
 }
