@@ -1,6 +1,8 @@
 
+
 #[derive(Debug)]
 struct SomeStruct {}
+struct IncomingMessage<'r> {msg: &'r str}
 
 #[dawnjection_codegen::with_di]
 fn some_function(msg: String, cnt: u32, stru: &SomeStruct) {
@@ -22,8 +24,8 @@ fn di_codegen_int_tes() {
 }
 
 #[dawnjection_codegen::handler_with_di]
-fn some_handler(msg: String, cnt: u32, stru: &SomeStruct) -> Result<(), dawnjection::Report> {
-    println!("{}  {}  {:?}", msg, cnt, stru);
+fn some_handler(imsg: IncomingMessage, msg: String, cnt: u32, stru: &SomeStruct) -> Result<(), dawnjection::Report> {
+    println!("{}  {}  {}  {:?}", imsg.msg, msg, cnt, stru);
     Ok(())
 }
 
@@ -35,6 +37,12 @@ async fn handler_with_di_test() {
         .reg_cloneable(5_u32)
         .reg_singleton(SomeStruct{})
         .build_service_provider_arc();
-    let ret = (hndlr.handler)(sp);
+
+    let scope = sp.create_scope_arc(Some(
+        
+        dawnjection::ServiceCollection::default()
+        .reg_takeable(IncomingMessage { msg: "this is a test" })));
+
+    let ret = (hndlr.handler)(scope);
     assert!(ret.await.is_ok())
 }
