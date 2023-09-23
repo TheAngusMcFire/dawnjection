@@ -1,4 +1,4 @@
-use std::{sync::atomic::AtomicU32};
+use std::sync::atomic::AtomicU32;
 use dawnjection::{ServiceCollection,IServiceProvider};
 use dawnjection_rocket::{I,R};
 
