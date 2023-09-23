@@ -24,7 +24,7 @@ fn di_codegen_int_tes() {
 }
 
 #[dawnjection_codegen::handler_with_di]
-fn some_handler(imsg: IncomingMessage, msg: String, cnt: u32, stru: &SomeStruct) -> Result<(), dawnjection::Report> {
+async fn some_handler(imsg: IncomingMessage<'_>, msg: String, cnt: u32, stru: &SomeStruct) -> Result<(), dawnjection::Report> {
     println!("{}  {}  {}  {:?}", imsg.msg, msg, cnt, stru);
     Ok(())
 }
