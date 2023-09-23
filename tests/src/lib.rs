@@ -38,10 +38,10 @@ async fn handler_with_di_test() {
         .reg_singleton(SomeStruct{})
         .build_service_provider_arc();
 
-    let scope = sp.create_scope_arc(Some(
-        
+    let scope = sp.create_scope_arc(Some(    
         dawnjection::ServiceCollection::default()
-        .reg_takeable(IncomingMessage { msg: "this is a test" })));
+        .reg_takeable(IncomingMessage { msg: "this is a test" })
+    ));
 
     let ret = (hndlr.handler)(scope);
     assert!(ret.await.is_ok())
