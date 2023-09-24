@@ -85,6 +85,11 @@ impl ServiceCollection {
         self
     }
 
+    pub fn register_takeable<T:  Sync + Send>(&mut self, instance: T) where T: 'static {
+        self.check_if_already_registered::<T>();
+        self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Take(Box::new(instance)));
+    }
+
     pub fn build_service_provider(self) -> ServiceProvider {
         ServiceProvider {
             map: Arc::new(self.map),
