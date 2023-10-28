@@ -4,10 +4,7 @@ use axum::{response::Html, Router, routing::get};
 use dawnjection::ServiceCollection;
 use dawnjection_axum::{I, AxumServiceProvider};
 
-
-
 async fn handler(I(msg): I<Arc<AtomicU32>>) -> Html<String> {
-    
     Html(format!("<h1>Hello, World! {}</h1>", msg.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
 }
 
@@ -22,9 +19,6 @@ async fn main() {
             .build_service_provider_arc()))
         ;
 
-     //app.with_state(AxumServiceProvider(ServiceCollection::default().build_service_provider_arc()));
-
-     // run it
      let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
      println!("listening on {}", addr);
      axum::Server::bind(&addr)
