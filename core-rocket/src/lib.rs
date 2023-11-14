@@ -3,7 +3,7 @@ use std::ops::Deref;
 use dawnjection::ServiceProvider;
 use rocket::{request::{FromRequest, self}, Request, outcome::Outcome, http::Status, State};
 use dawnjection::IServiceProvider;
-use rocket::outcome::Outcome::Failure;
+use rocket::outcome::Outcome::Error;
 
 pub struct I<T>(pub T);
 
@@ -17,16 +17,16 @@ impl<T> I<T> {
 impl<'r, T: 'static> FromRequest<'r> for I<T> {
     type Error = ();
 
-    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, (Status, ()), ()>
+    async fn from_request(request: &'r Request<'_>) -> request::Outcome<Self, ()>
     {
         return match request.guard::<&State<ServiceProvider>>().await {
             Outcome::Success(x) => {
                 match x.try_get::<T>() {
                     Some(x) => Outcome::Success(I(x)),
-                    _ => Failure((Status::InternalServerError,()))  
+                    _ => Error((Status::InternalServerError,()))  
                 }
             },
-            _ => Failure((Status::InternalServerError,())) 
+            _ => Error((Status::InternalServerError,())) 
         };
     }
 }
@@ -49,10 +49,10 @@ impl<'r, T: 'static> FromRequest<'r> for R<'r, T> {
             Outcome::Success(x) => {
                 match x.try_get_ref::<T>() {
                     Some(x) => Outcome::Success(R(x)),
-                    _ => Failure((Status::InternalServerError,()))  
+                    _ => Error((Status::InternalServerError,()))  
                 }
             },
-            _ => Failure((Status::InternalServerError,())) 
+            _ => Error((Status::InternalServerError,())) 
         };
     }
 }
