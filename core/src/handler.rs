@@ -86,8 +86,9 @@ pub trait Handler<T, S, P, M>: Clone + Send + Sized + 'static {
     fn call(self, req: Request<P, M>, state: S) -> Self::Future;
 }
 
+// Request gets consumed
 #[async_trait::async_trait]
-impl<S, P, M, T> FromRequest<S, P, M, private::ViaMetadata> for T
+impl<S, P, M, T> FromRequestBody<S, P, M, private::ViaMetadata> for T
 where
     P: Send + 'static,
     M: Send + 'static,
@@ -123,7 +124,7 @@ pub trait FromRequestMetadata<S, M>: Sized {
 
 // from request consumes the request, so it is used to get the payload out of the body
 #[async_trait::async_trait]
-pub trait FromRequest<S, P, M, A = private::ViaRequest>: Sized {
+pub trait FromRequestBody<S, P, M, A = private::ViaRequest>: Sized {
     /// If the extractor fails it'll use this "rejection" type. A rejection is
     /// a kind of error that can be converted into a response.
     type Rejection: IntoResponse;
@@ -192,7 +193,7 @@ macro_rules! impl_handler {
             S: Send + Sync + 'static,
             Res: IntoResponse,
             $( $ty: FromRequestMetadata<S, M> + Send, )*
-            $last: FromRequest<S, P, M, A> + Send,
+            $last: FromRequestBody<S, P, M, A> + Send,
         {
             type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
 

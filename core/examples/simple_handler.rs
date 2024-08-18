@@ -1,4 +1,4 @@
-use dawnjection::handler::{FromRequest, FromRequestMetadata, HandlerRegistry, Request};
+use dawnjection::handler::{FromRequestBody, FromRequestMetadata, HandlerRegistry, Request};
 
 #[derive(Default)]
 pub struct Body {
@@ -35,7 +35,7 @@ impl FromRequestMetadata<State, Meta> for Config {
 
 pub struct MessagePayload(String);
 #[async_trait::async_trait]
-impl FromRequest<State, Body, Meta> for MessagePayload {
+impl FromRequestBody<State, Body, Meta> for MessagePayload {
     type Rejection = ();
     async fn from_request(
         req: Request<Body, Meta>,
@@ -80,7 +80,7 @@ async fn main() {
         first_handler_which_takes_a_message_and_returns_a_string,
     );
 
-    let resp = reg
+    let _resp = reg
         .handlers
         .get(stringify!(
             first_handler_which_takes_a_message_and_returns_a_string
