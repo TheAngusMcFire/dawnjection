@@ -1,9 +1,43 @@
 use std::any::{Any, TypeId};
 use std::clone::Clone;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+#[cfg(feature = "axum")]
+pub mod axum;
 pub mod handler;
+#[cfg(feature = "rocket")]
+pub mod rocket;
+
+pub struct I<T>(pub T);
+
+impl<T> I<T> {
+    pub fn get(self) -> T {
+        self.0
+    }
+}
+
+#[derive(Clone)]
+pub struct ServiceProviderContainer(pub Arc<ServiceProvider>);
+
+pub struct R<T: 'static> {
+    provider: ServiceProviderContainer,
+    phantom: PhantomData<T>,
+}
+
+impl<T> R<T> {
+    pub fn new(provider: ServiceProviderContainer) -> Self {
+        Self {
+            provider,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn get(&self) -> Option<&T> {
+        self.provider.0.try_get_ref()
+    }
+}
 
 pub type Report = eyre::Report;
 pub type BoxFuture<'r, T = Result<(), Report>> = futures::future::BoxFuture<'r, T>;
