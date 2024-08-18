@@ -4,7 +4,7 @@ use axum::{
     http::{request::Parts, StatusCode},
 };
 
-use crate::{IServiceProvider, ServiceProviderContainer, I, R};
+use crate::{ServiceProviderContainer, I, R};
 
 #[async_trait]
 impl<S, T: 'static> FromRequestParts<S> for I<T>

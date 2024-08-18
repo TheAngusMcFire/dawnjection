@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::{IServiceProvider, ServiceProvider};
+use crate::ServiceProvider;
 use rocket::outcome::Outcome::Error;
 use rocket::{
     http::Status,

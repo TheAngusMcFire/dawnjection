@@ -21,6 +21,16 @@ impl<T> I<T> {
 #[derive(Clone)]
 pub struct ServiceProviderContainer(pub Arc<ServiceProvider>);
 
+pub trait ServiceProviderAccess {
+    fn get_sp_arc(&self) -> &Arc<ServiceProvider>;
+}
+
+impl ServiceProviderAccess for ServiceProviderContainer {
+    fn get_sp_arc(&self) -> &Arc<ServiceProvider> {
+        &self.0
+    }
+}
+
 pub struct R<T: 'static> {
     provider: ServiceProviderContainer,
     phantom: PhantomData<T>,
@@ -34,7 +44,16 @@ impl<T> R<T> {
         }
     }
 
-    pub fn get(&self) -> Option<&T> {
+    pub fn get(&self) -> &T {
+        self.provider.0.try_get_ref::<T>().unwrap_or_else(|| {
+            panic!(
+                "Expected registered type in Dependency Injection: {}",
+                std::any::type_name::<T>()
+            )
+        })
+    }
+
+    pub fn try_get(&self) -> Option<&T> {
         self.provider.0.try_get_ref()
     }
 }
@@ -182,6 +201,7 @@ pub trait IServiceProvider {
     fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>>;
 }
 
+#[derive(Clone)]
 pub struct ServiceProvider {
     map: Arc<HashMap<std::any::TypeId, ServiceDescriptor>>,
     scope_context: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>,
@@ -203,9 +223,7 @@ impl ServiceProvider {
     pub fn create_scope_arc(&self, scope_seed: Option<ServiceCollection>) -> Arc<Self> {
         self.create_scope(scope_seed).into()
     }
-}
 
-impl IServiceProvider for ServiceProvider {
     fn try_take<T: 'static>(&self) -> Option<T> {
         self.scope_context.as_ref()?;
 
@@ -286,9 +304,28 @@ impl IServiceProvider for ServiceProvider {
     }
 }
 
+// this is legacy
+impl IServiceProvider for ServiceProvider {
+    fn try_take<T: 'static>(&self) -> Option<T> {
+        self.try_take()
+    }
+
+    fn try_get<T: 'static>(&self) -> Option<T> {
+        self.try_get()
+    }
+
+    fn try_get_ref<T: 'static>(&self) -> Option<&T> {
+        self.try_get_ref()
+    }
+
+    fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>> {
+        self.try_get_mut()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{IServiceProvider, ServiceCollection};
+    use crate::ServiceCollection;
 
     #[test]
     fn basic_clone() {

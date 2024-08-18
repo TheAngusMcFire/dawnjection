@@ -2,6 +2,8 @@ use std::{collections::HashMap, marker::PhantomData, pin::Pin};
 
 use futures::Future;
 
+use crate::{ServiceProviderAccess, I};
+
 #[rustfmt::skip]
 macro_rules! all_the_tuples {
     ($name:ident) => {
@@ -24,11 +26,52 @@ macro_rules! all_the_tuples {
     };
 }
 
+//////////////////////////////  implementations of the DI types \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+#[async_trait::async_trait]
+impl<S, M, R, T: 'static> FromRequestMetadata<S, M, R> for I<T>
+where
+    S: Send + Sync + ServiceProviderAccess,
+{
+    type Rejection = Result<R, eyre::Report>;
+
+    async fn from_request_parts(_parts: &mut M, state: &S) -> Result<Self, Self::Rejection> {
+        let r = state.get_sp_arc().as_ref();
+        Ok(I(r.try_get::<T>().unwrap_or_else(|| {
+            panic!(
+                "Expected registered type in Dependency Injection: {}",
+                std::any::type_name::<T>()
+            )
+        })))
+    }
+}
+
+#[async_trait::async_trait]
+impl<S, M, R, T: 'static> FromRequestMetadata<S, M, R> for crate::R<T>
+where
+    S: Send + Sync + ServiceProviderAccess,
+{
+    type Rejection = Result<R, eyre::Report>;
+
+    async fn from_request_parts(_parts: &mut M, state: &S) -> Result<Self, Self::Rejection> {
+        Ok(crate::R::new(crate::ServiceProviderContainer(
+            state.get_sp_arc().clone(),
+        )))
+    }
+}
+
 //////////////////////////////  the handler registration  \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-#[derive(Default)]
 pub struct HandlerRegistry<P, M, S, R> {
     pub handlers: HashMap<String, Box<dyn HanderCall<P, M, S, R>>>,
+}
+
+impl<P, M, S, R> Default for HandlerRegistry<P, M, S, R> {
+    fn default() -> Self {
+        Self {
+            handlers: HashMap::new(),
+        }
+    }
 }
 
 pub struct HandlerEndpoint<T, H> {
