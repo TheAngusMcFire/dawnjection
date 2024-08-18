@@ -21,8 +21,8 @@ pub struct Config {
 
 // retrieves data from the Message metadata and the state
 #[async_trait::async_trait]
-impl FromRequestMetadata<State, Meta> for Config {
-    type Rejection = ();
+impl FromRequestMetadata<State, Meta, String> for Config {
+    type Rejection = Result<String, eyre::Report>;
     async fn from_request_parts(
         _parts: &mut Meta,
         _state: &State,
@@ -35,8 +35,8 @@ impl FromRequestMetadata<State, Meta> for Config {
 
 pub struct MessagePayload(String);
 #[async_trait::async_trait]
-impl FromRequestBody<State, Body, Meta> for MessagePayload {
-    type Rejection = ();
+impl FromRequestBody<State, Body, Meta, String> for MessagePayload {
+    type Rejection = Result<String, eyre::Report>;
     async fn from_request(
         req: Request<Body, Meta>,
         _state: &State,
@@ -45,29 +45,36 @@ impl FromRequestBody<State, Body, Meta> for MessagePayload {
     }
 }
 
-async fn first_handler_which_does_nothing(config: Config) {
+async fn first_handler_which_only_returns_a_string(config: Config) -> String {
     println!(stringify!(first_handler_which_does_nothing));
     println!("config value: {}", config.msg);
+    "this is the way we want to do something".into()
 }
 
-async fn first_handler_which_returns_a_string(config: Config) -> String {
+async fn first_handler_which_does_nothing(config: Config) -> Result<String, eyre::Report> {
+    println!(stringify!(first_handler_which_does_nothing));
+    println!("config value: {}", config.msg);
+    Ok("this is the way we want to do something".into())
+}
+
+async fn first_handler_which_returns_a_string(config: Config) -> Result<String, eyre::Report> {
     println!(stringify!(first_handler_which_returns_a_string));
     println!("config value: {}", config.msg);
-    "this is the way we want to do something".into()
+    Ok("this is the way we want to do something".into())
 }
 
 async fn first_handler_which_takes_a_message_and_returns_a_string(
     config: Config,
     MessagePayload(msg): MessagePayload,
-) -> String {
+) -> Result<String, eyre::Report> {
     println!(stringify!(first_handler_which_returns_a_string));
     println!("config value: {} payload value: {}", config.msg, msg);
-    "this is the way we want to do something".into()
+    Ok("this is the way we want to do something".into())
 }
 
 #[tokio::main]
 async fn main() {
-    let mut reg = HandlerRegistry::<Body, Meta, State>::default();
+    let mut reg = HandlerRegistry::<Body, Meta, State, String>::default();
     let handler_name = stringify!(first_handler_which_does_nothing);
     reg.register(handler_name, first_handler_which_does_nothing);
     reg.register(
@@ -78,6 +85,11 @@ async fn main() {
     reg.register(
         stringify!(first_handler_which_takes_a_message_and_returns_a_string),
         first_handler_which_takes_a_message_and_returns_a_string,
+    );
+
+    reg.register(
+        stringify!(first_handler_which_only_returns_a_string),
+        first_handler_which_only_returns_a_string,
     );
 
     let _resp = reg

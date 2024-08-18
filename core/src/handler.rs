@@ -25,8 +25,8 @@ macro_rules! all_the_tuples {
 }
 
 #[derive(Default)]
-pub struct HandlerRegistry<P, M, S> {
-    pub handlers: HashMap<String, Box<dyn HanderCall<P, M, S>>>,
+pub struct HandlerRegistry<P, M, S, R> {
+    pub handlers: HashMap<String, Box<dyn HanderCall<P, M, S, R>>>,
 }
 
 pub struct HandlerEndpoint<T, H> {
@@ -40,19 +40,22 @@ impl<
         S: Send + 'static,
         P: Send + 'static,
         M: Send + 'static,
-        H: Handler<T, S, P, M> + Send + Sync,
-    > HanderCall<P, M, S> for HandlerEndpoint<T, H>
+        R: Send + 'static,
+        H: Handler<T, S, P, M, R> + Send + Sync,
+    > HanderCall<P, M, S, R> for HandlerEndpoint<T, H>
 {
-    async fn call(&self, req: Request<P, M>, state: S) -> Response {
+    async fn call(&self, req: Request<P, M>, state: S) -> Response<R> {
         self.handler.clone().call(req, state).await
     }
 }
 
-impl<P: Send + 'static, M: Send + 'static, S: Send + 'static> HandlerRegistry<P, M, S> {
+impl<P: Send + 'static, M: Send + 'static, S: Send + 'static, R: Send + 'static>
+    HandlerRegistry<P, M, S, R>
+{
     pub fn register<
         N: Into<String>,
         T: Sync + 'static,
-        H: Handler<T, S, P, M> + Send + Sync + 'static,
+        H: Handler<T, S, P, M, R> + Send + Sync + 'static,
     >(
         &mut self,
         name: N,
@@ -71,8 +74,8 @@ impl<P: Send + 'static, M: Send + 'static, S: Send + 'static> HandlerRegistry<P,
 // State, the state of the entire service
 
 #[async_trait::async_trait]
-pub trait HanderCall<P, M, S> {
-    async fn call(&self, req: Request<P, M>, state: S) -> Response;
+pub trait HanderCall<P, M, S, R> {
+    async fn call(&self, req: Request<P, M>, state: S) -> Response<R>;
 }
 
 pub struct Request<P, M> {
@@ -80,22 +83,23 @@ pub struct Request<P, M> {
     pub payload: P,
 }
 
-pub trait Handler<T, S, P, M>: Clone + Send + Sized + 'static {
-    type Future: Future<Output = Response> + Send + 'static;
+pub trait Handler<T, S, P, M, R>: Clone + Send + Sized + 'static {
+    type Future: Future<Output = Response<R>> + Send + 'static;
 
     fn call(self, req: Request<P, M>, state: S) -> Self::Future;
 }
 
 // Request gets consumed
 #[async_trait::async_trait]
-impl<S, P, M, T> FromRequestBody<S, P, M, private::ViaMetadata> for T
+impl<S, P, M, T, R> FromRequestBody<S, P, M, R, private::ViaMetadata> for T
 where
     P: Send + 'static,
     M: Send + 'static,
+    R: Send + 'static,
     S: Send + Sync,
-    T: FromRequestMetadata<S, M>,
+    T: FromRequestMetadata<S, M, R>,
 {
-    type Rejection = <Self as FromRequestMetadata<S, M>>::Rejection;
+    type Rejection = <Self as FromRequestMetadata<S, M, R>>::Rejection;
 
     async fn from_request(req: Request<P, M>, state: &S) -> Result<Self, Self::Rejection> {
         let (mut metadata, _) = req.into_comps();
@@ -113,42 +117,69 @@ mod private {
 }
 
 #[async_trait::async_trait]
-pub trait FromRequestMetadata<S, M>: Sized {
+pub trait FromRequestMetadata<S, M, R>: Sized {
     /// If the extractor fails it'll use this "rejection" type. A rejection is
     /// a kind of error that can be converted into a response.
-    type Rejection: IntoResponse;
+    type Rejection: IntoResponse<R>;
 
     /// Perform the extraction.
     async fn from_request_parts(metadata: &mut M, state: &S) -> Result<Self, Self::Rejection>;
 }
-
 // from request consumes the request, so it is used to get the payload out of the body
 #[async_trait::async_trait]
-pub trait FromRequestBody<S, P, M, A = private::ViaRequest>: Sized {
+pub trait FromRequestBody<S, P, M, R, A = private::ViaRequest>: Sized {
     /// If the extractor fails it'll use this "rejection" type. A rejection is
     /// a kind of error that can be converted into a response.
-    type Rejection: IntoResponse;
+    type Rejection: IntoResponse<R>;
 
     /// Perform the extraction.
     async fn from_request(req: Request<P, M>, state: &S) -> Result<Self, Self::Rejection>;
 }
 
-pub struct Response {}
-
-pub trait IntoResponse {
-    /// Create a response.
-    fn into_response(self) -> Response;
+pub struct Response<P> {
+    pub success: bool,
+    pub report: Option<eyre::Report>,
+    pub payload: Option<P>,
 }
 
-impl IntoResponse for () {
-    fn into_response(self) -> Response {
-        Response {}
+pub trait IntoResponse<P> {
+    fn into_response(self) -> Response<P>;
+}
+
+// impl IntoResponse<()> for () {
+//     fn into_response(self) -> Response<()> {
+//         Response {
+//             payload: None,
+//             success: true,
+//             report: None,
+//         }
+//     }
+// }
+
+impl<T> IntoResponse<T> for T {
+    fn into_response(self) -> Response<T> {
+        Response {
+            success: true,
+            report: None,
+            payload: Some(self),
+        }
     }
 }
 
-impl IntoResponse for String {
-    fn into_response(self) -> Response {
-        Response {}
+impl<T> IntoResponse<T> for Result<T, eyre::Report> {
+    fn into_response(self) -> Response<T> {
+        match self {
+            Ok(p) => Response {
+                success: true,
+                report: None,
+                payload: Some(p),
+            },
+            Err(x) => Response {
+                success: false,
+                report: Some(x),
+                payload: None,
+            },
+        }
     }
 }
 
@@ -164,15 +195,16 @@ impl<P, M> Request<P, M> {
     }
 }
 
-impl<F, Fut, Res, S, P, M> Handler<((),), S, P, M> for F
+impl<F, Fut, Res, S, P, M, R> Handler<((),), S, P, M, R> for F
 where
     F: FnOnce() -> Fut + Clone + Send + 'static,
     Fut: Future<Output = Res> + Send,
-    Res: IntoResponse,
+    Res: IntoResponse<R>,
     P: Send + 'static,
     M: Send + 'static,
+    R: Send + 'static,
 {
-    type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = Response<R>> + Send>>;
 
     fn call(self, _req: Request<P, M>, _state: S) -> Self::Future {
         Box::pin(async move { self().await.into_response() })
@@ -184,18 +216,19 @@ macro_rules! impl_handler {
         [$($ty:ident),*], $last:ident
     ) => {
         #[allow(non_snake_case, unused_mut)]
-        impl<F, Fut, S, P, M, Res, A, $($ty,)* $last> Handler<(A, $($ty,)* $last,), S, P, M> for F
+        impl<F, Fut, S, P, M, Res, R, A, $($ty,)* $last> Handler<(A, $($ty,)* $last,), S, P, M, R> for F
         where
             F: FnOnce($($ty,)* $last,) -> Fut + Clone + Send + 'static,
             Fut: Future<Output = Res> + Send,
             P: Send + 'static,
             M: Send + 'static,
+            R: Send + 'static,
             S: Send + Sync + 'static,
-            Res: IntoResponse,
-            $( $ty: FromRequestMetadata<S, M> + Send, )*
-            $last: FromRequestBody<S, P, M, A> + Send,
+            Res: IntoResponse<R>,
+            $( $ty: FromRequestMetadata<S, M, R> + Send, )*
+            $last: FromRequestBody<S, P, M, R, A> + Send,
         {
-            type Future = Pin<Box<dyn Future<Output = Response> + Send>>;
+            type Future = Pin<Box<dyn Future<Output = Response<R>> + Send>>;
 
             fn call(self, req: Request<P, M>, state: S) -> Self::Future {
                 Box::pin(async move {
@@ -218,7 +251,7 @@ macro_rules! impl_handler {
 
                     let res = self($($ty,)* $last,).await;
 
-                    res.into_response()
+                   res.into_response()
                 })
             }
         }
