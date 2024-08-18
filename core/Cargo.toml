@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1.81"
 dawnjection-codegen ={ path = "../core-codegen" }
 eyre = "0.6.8"
 futures = "0.3.28"
