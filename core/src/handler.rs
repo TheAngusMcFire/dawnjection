@@ -24,8 +24,9 @@ macro_rules! all_the_tuples {
     };
 }
 
+#[derive(Default)]
 pub struct HandlerRegistry<B, S> {
-    handlers: HashMap<String, Box<dyn HanderCall<B, S>>>,
+    pub handlers: HashMap<String, Box<dyn HanderCall<B, S>>>,
 }
 
 pub struct HandlerEndpoint<T, H> {
@@ -115,6 +116,7 @@ mod private {
     pub enum ViaRequest {}
 }
 
+// from request consumes the request, so it is used to get the payload out of the body
 #[async_trait::async_trait]
 pub trait FromRequest<S, B, M = private::ViaRequest>: Sized {
     /// If the extractor fails it'll use this "rejection" type. A rejection is
@@ -132,9 +134,21 @@ pub trait IntoResponse {
     fn into_response(self) -> Response;
 }
 
+impl IntoResponse for () {
+    fn into_response(self) -> Response {
+        Response {}
+    }
+}
+
+impl IntoResponse for String {
+    fn into_response(self) -> Response {
+        Response {}
+    }
+}
+
 pub struct Request<T> {
-    head: Parts,
-    body: T,
+    pub head: Parts,
+    pub body: T,
 }
 
 impl<T> Request<T> {

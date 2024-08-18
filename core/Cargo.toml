@@ -10,3 +10,7 @@ async-trait = "0.1.81"
 dawnjection-codegen ={ path = "../core-codegen" }
 eyre = "0.6.8"
 futures = "0.3.28"
+
+
+[dev-dependencies]
+tokio = {version="*", features = ["full"]}
