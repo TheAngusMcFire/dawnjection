@@ -46,7 +46,7 @@ impl<
         H: Handler<T, S, P, M, R> + Send + Sync,
     > HanderCall<P, M, S, R> for HandlerEndpoint<T, H>
 {
-    async fn call(&self, req: Request<P, M>, state: S) -> Response<R> {
+    async fn call(&self, req: HandlerRequest<P, M>, state: S) -> Response<R> {
         self.handler.clone().call(req, state).await
     }
 }
@@ -75,12 +75,12 @@ impl<P: Send + 'static, M: Send + 'static, S: Send + 'static, R: Send + 'static>
 
 #[async_trait::async_trait]
 pub trait HanderCall<P, M, S, R> {
-    async fn call(&self, req: Request<P, M>, state: S) -> Response<R>;
+    async fn call(&self, req: HandlerRequest<P, M>, state: S) -> Response<R>;
 }
 
 //////////////////////////////  the actual handler abstractions  \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
-pub struct Request<P, M> {
+pub struct HandlerRequest<P, M> {
     pub metadata: M,
     pub payload: P,
 }
@@ -88,7 +88,7 @@ pub struct Request<P, M> {
 pub trait Handler<T, S, P, M, R>: Clone + Send + Sized + 'static {
     type Future: Future<Output = Response<R>> + Send + 'static;
 
-    fn call(self, req: Request<P, M>, state: S) -> Self::Future;
+    fn call(self, req: HandlerRequest<P, M>, state: S) -> Self::Future;
 }
 
 // Request gets consumed
@@ -103,7 +103,7 @@ where
 {
     type Rejection = <Self as FromRequestMetadata<S, M, R>>::Rejection;
 
-    async fn from_request(req: Request<P, M>, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: HandlerRequest<P, M>, state: &S) -> Result<Self, Self::Rejection> {
         let (mut metadata, _) = req.into_comps();
         Self::from_request_parts(&mut metadata, state).await
     }
@@ -128,7 +128,7 @@ pub trait FromRequestMetadata<S, M, R>: Sized {
 #[async_trait::async_trait]
 pub trait FromRequestBody<S, P, M, R, A = private::ViaRequest>: Sized {
     type Rejection: IntoResponse<R>;
-    async fn from_request(req: Request<P, M>, state: &S) -> Result<Self, Self::Rejection>;
+    async fn from_request(req: HandlerRequest<P, M>, state: &S) -> Result<Self, Self::Rejection>;
 }
 
 pub struct Response<P> {
@@ -168,15 +168,15 @@ impl<T> IntoResponse<T> for Result<T, eyre::Report> {
     }
 }
 
-impl<P, M> Request<P, M> {
+impl<P, M> HandlerRequest<P, M> {
     #[inline]
     pub fn into_comps(self) -> (M, P) {
         (self.metadata, self.payload)
     }
 
     #[inline]
-    pub fn from_comps(metadata: M, payload: P) -> Request<P, M> {
-        Request { metadata, payload }
+    pub fn from_comps(metadata: M, payload: P) -> HandlerRequest<P, M> {
+        HandlerRequest { metadata, payload }
     }
 }
 
@@ -191,7 +191,7 @@ where
 {
     type Future = Pin<Box<dyn Future<Output = Response<R>> + Send>>;
 
-    fn call(self, _req: Request<P, M>, _state: S) -> Self::Future {
+    fn call(self, _req: HandlerRequest<P, M>, _state: S) -> Self::Future {
         Box::pin(async move { self().await.into_response() })
     }
 }
@@ -215,7 +215,7 @@ macro_rules! impl_handler {
         {
             type Future = Pin<Box<dyn Future<Output = Response<R>> + Send>>;
 
-            fn call(self, req: Request<P, M>, state: S) -> Self::Future {
+            fn call(self, req: HandlerRequest<P, M>, state: S) -> Self::Future {
                 Box::pin(async move {
                     let (mut metadata, body) = req.into_comps();
                     let state = &state;
@@ -227,7 +227,7 @@ macro_rules! impl_handler {
                         };
                     )*
 
-                    let req = Request::from_comps(metadata, body);
+                    let req = HandlerRequest::from_comps(metadata, body);
 
                     let $last = match $last::from_request(req, state).await {
                         Ok(value) => value,

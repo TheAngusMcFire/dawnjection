@@ -1,4 +1,4 @@
-use dawnjection::handler::{FromRequestBody, FromRequestMetadata, HandlerRegistry, Request};
+use dawnjection::handler::{FromRequestBody, FromRequestMetadata, HandlerRegistry, HandlerRequest};
 
 #[derive(Default)]
 pub struct Body {
@@ -38,7 +38,7 @@ pub struct MessagePayload(String);
 impl FromRequestBody<State, Body, Meta, String> for MessagePayload {
     type Rejection = Result<String, eyre::Report>;
     async fn from_request(
-        req: Request<Body, Meta>,
+        req: HandlerRequest<Body, Meta>,
         _state: &State,
     ) -> Result<Self, Self::Rejection> {
         Ok(MessagePayload(req.payload.incomming_message))
@@ -99,7 +99,7 @@ async fn main() {
         ))
         .unwrap()
         .call(
-            Request::<Body, Meta> {
+            HandlerRequest::<Body, Meta> {
                 metadata: Meta {},
                 payload: Body {
                     incomming_message: "this is some message".into(),
