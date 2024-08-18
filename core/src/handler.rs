@@ -1,4 +1,4 @@
-use std::pin::Pin;
+use std::{collections::HashMap, marker::PhantomData, pin::Pin};
 
 use futures::Future;
 
@@ -22,6 +22,51 @@ macro_rules! all_the_tuples {
         $name!([T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14], T15);
         $name!([T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15], T16);
     };
+}
+
+pub struct HandlerRegistry<B, S> {
+    handlers: HashMap<String, Box<dyn HanderCall<B, S>>>,
+}
+
+pub struct HandlerEndpoint<T, H> {
+    handler: H,
+    pd: PhantomData<T>,
+}
+
+#[async_trait::async_trait]
+impl<T: Sync, S: Send + 'static, B: Send + 'static, H: Handler<T, S, B> + Send + Sync>
+    HanderCall<B, S> for HandlerEndpoint<T, H>
+{
+    async fn call(&self, req: Request<B>, state: S) -> Response {
+        self.handler.clone().call(req, state).await
+    }
+}
+
+impl<B: Send + 'static, S: Send + 'static> HandlerRegistry<B, S> {
+    pub fn register<
+        N: Into<String>,
+        T: Sync + 'static,
+        H: Handler<T, S, B> + Send + Sync + 'static,
+    >(
+        &mut self,
+        name: N,
+        handler: H,
+    ) {
+        self.handlers.insert(
+            name.into(),
+            Box::new(HandlerEndpoint {
+                handler,
+                pd: Default::default(),
+            }),
+        );
+    }
+}
+// Body, the body of the request, defaults to body
+// State, the state of the entire service
+
+#[async_trait::async_trait]
+pub trait HanderCall<B, S> {
+    async fn call(&self, req: Request<B>, state: S) -> Response;
 }
 
 pub struct Body {
@@ -100,10 +145,7 @@ impl<T> Request<T> {
 
     #[inline]
     pub fn from_parts(parts: Parts, body: T) -> Request<T> {
-        Request {
-            head: parts,
-            body: body,
-        }
+        Request { head: parts, body }
     }
 }
 
