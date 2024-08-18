@@ -24,6 +24,8 @@ macro_rules! all_the_tuples {
     };
 }
 
+//////////////////////////////  the handler registration  \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
 #[derive(Default)]
 pub struct HandlerRegistry<P, M, S, R> {
     pub handlers: HashMap<String, Box<dyn HanderCall<P, M, S, R>>>,
@@ -70,13 +72,13 @@ impl<P: Send + 'static, M: Send + 'static, S: Send + 'static, R: Send + 'static>
         );
     }
 }
-// Body, the body of the request, defaults to body
-// State, the state of the entire service
 
 #[async_trait::async_trait]
 pub trait HanderCall<P, M, S, R> {
     async fn call(&self, req: Request<P, M>, state: S) -> Response<R>;
 }
+
+//////////////////////////////  the actual handler abstractions  \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 pub struct Request<P, M> {
     pub metadata: M,
@@ -118,21 +120,14 @@ mod private {
 
 #[async_trait::async_trait]
 pub trait FromRequestMetadata<S, M, R>: Sized {
-    /// If the extractor fails it'll use this "rejection" type. A rejection is
-    /// a kind of error that can be converted into a response.
     type Rejection: IntoResponse<R>;
-
-    /// Perform the extraction.
     async fn from_request_parts(metadata: &mut M, state: &S) -> Result<Self, Self::Rejection>;
 }
+
 // from request consumes the request, so it is used to get the payload out of the body
 #[async_trait::async_trait]
 pub trait FromRequestBody<S, P, M, R, A = private::ViaRequest>: Sized {
-    /// If the extractor fails it'll use this "rejection" type. A rejection is
-    /// a kind of error that can be converted into a response.
     type Rejection: IntoResponse<R>;
-
-    /// Perform the extraction.
     async fn from_request(req: Request<P, M>, state: &S) -> Result<Self, Self::Rejection>;
 }
 
@@ -145,16 +140,6 @@ pub struct Response<P> {
 pub trait IntoResponse<P> {
     fn into_response(self) -> Response<P>;
 }
-
-// impl IntoResponse<()> for () {
-//     fn into_response(self) -> Response<()> {
-//         Response {
-//             payload: None,
-//             success: true,
-//             report: None,
-//         }
-//     }
-// }
 
 impl<T> IntoResponse<T> for T {
     fn into_response(self) -> Response<T> {
