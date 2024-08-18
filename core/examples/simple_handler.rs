@@ -21,6 +21,7 @@ pub struct Config {
     msg: &'static str,
 }
 
+// todo remove at some point
 // trait implementations:
 // trait from other crates can only be implemented for types of this crate
 // trait implementations for other crates can only be done within the crate its defined
