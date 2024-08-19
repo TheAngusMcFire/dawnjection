@@ -63,25 +63,26 @@ where
 //////////////////////////////  the handler registration  \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 pub struct HandlerRegistry<P, M, S, R> {
-    pub handlers: HashMap<String, Box<dyn HanderCall<P, M, S, R>>>,
+    pub handlers: Vec<(String, Box<dyn HanderCall<P, M, S, R>>)>,
 }
 
 impl<P, M, S, R> Default for HandlerRegistry<P, M, S, R> {
     fn default() -> Self {
         Self {
-            handlers: HashMap::new(),
+            handlers: Vec::new(),
         }
     }
 }
 
-pub struct HandlerEndpoint<T, H> {
+#[derive(Clone)]
+pub struct HandlerEndpoint<T, H: Send> {
     handler: H,
     pd: PhantomData<T>,
 }
 
 #[async_trait::async_trait]
 impl<
-        T: Sync,
+        T: Send + Sync,
         S: Send + 'static,
         P: Send + 'static,
         M: Send + 'static,
@@ -97,32 +98,43 @@ impl<
 impl<P: Send + 'static, M: Send + 'static, S: Send + 'static, R: Send + 'static>
     HandlerRegistry<P, M, S, R>
 {
-    pub fn register<
+    pub fn register<T: Send + Sync + 'static, H: Handler<T, S, P, M, R> + Send + Sync + 'static>(
+        self,
+        handler: H,
+    ) -> Self {
+        let name = std::any::type_name::<H>()
+            .split("::")
+            .last()
+            .expect("there shouln be at least one thingto the name");
+        self.register_with_name(name, handler)
+    }
+    pub fn register_with_name<
         N: Into<String>,
-        T: Sync + 'static,
+        T: Send + Sync + 'static,
         H: Handler<T, S, P, M, R> + Send + Sync + 'static,
     >(
-        &mut self,
+        mut self,
         name: N,
         handler: H,
-    ) {
-        self.handlers.insert(
+    ) -> Self {
+        self.handlers.push((
             name.into(),
             Box::new(HandlerEndpoint {
                 handler,
                 pd: Default::default(),
             }),
-        );
+        ));
+        self
     }
 }
 
 #[async_trait::async_trait]
-pub trait HanderCall<P, M, S, R> {
+pub trait HanderCall<P, M, S, R>: Send {
     async fn call(&self, req: HandlerRequest<P, M>, state: S) -> Response<R>;
 }
 
 //////////////////////////////  the actual handler abstractions  \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-
+#[derive(Clone)]
 pub struct HandlerRequest<P, M> {
     pub metadata: M,
     pub payload: P,

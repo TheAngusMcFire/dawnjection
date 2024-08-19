@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 #[cfg(feature = "axum")]
 pub mod axum;
 pub mod handler;
+#[cfg(feature = "nats")]
+pub mod nats;
 #[cfg(feature = "rocket")]
 pub mod rocket;
 

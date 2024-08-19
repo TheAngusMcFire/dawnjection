@@ -72,30 +72,18 @@ async fn first_handler_which_takes_a_message_and_returns_a_string(
 
 #[tokio::main]
 async fn main() {
-    let mut reg = HandlerRegistry::<Body, Meta, ServiceProviderContainer, String>::default();
-    let handler_name = stringify!(first_handler_which_does_nothing);
-    reg.register(handler_name, first_handler_which_does_nothing);
-    reg.register(
-        stringify!(first_handler_which_returns_a_string),
-        first_handler_which_returns_a_string,
-    );
-
-    reg.register(
-        stringify!(first_handler_which_takes_a_message_and_returns_a_string),
-        first_handler_which_takes_a_message_and_returns_a_string,
-    );
-
-    reg.register(
-        stringify!(first_handler_which_only_returns_a_string),
-        first_handler_which_only_returns_a_string,
-    );
+    let reg = HandlerRegistry::<Body, Meta, ServiceProviderContainer, String>::default()
+        .register(first_handler_which_does_nothing)
+        .register(first_handler_which_returns_a_string)
+        .register(first_handler_which_takes_a_message_and_returns_a_string)
+        .register(first_handler_which_only_returns_a_string);
 
     let _resp = reg
         .handlers
-        .get(stringify!(
-            first_handler_which_takes_a_message_and_returns_a_string
-        ))
+        .iter()
+        .find(|x| x.0 == stringify!(first_handler_which_takes_a_message_and_returns_a_string))
         .unwrap()
+        .1
         .call(
             HandlerRequest::<Body, Meta> {
                 metadata: Meta {},
