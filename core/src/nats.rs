@@ -14,12 +14,12 @@ use async_nats::{
 };
 use eyre::bail;
 // use color_eyre::owo_colors::OwoColorize;
-use futures::StreamExt;
+use futures::{future::join_all, StreamExt};
 
-use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest};
+use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, Response};
 
 pub struct NatsPayload {
-    data: bytes::Bytes,
+    pub data: bytes::Bytes,
 }
 pub struct NatsMetadata {}
 
@@ -30,7 +30,7 @@ pub struct NatsDispatcher<P, M, S, R> {
     // different subscibers can subscribe to the same toppic
     // use case: multiple things to do with one data point e.g. one which analyzes the data point and one which saves it.
     subscribers: HandlerRegistry<P, M, S, R>,
-    max_concurrent_tasks: u32,
+    max_concurrent_tasks: usize,
     connection_string: String,
     state: S,
     stream_name: String,
@@ -41,7 +41,7 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
         consumers: HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
         subscribers: HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
         connection_string: &str,
-        max_concurrent_tasks: u32,
+        max_concurrent_tasks: usize,
         state: S,
         stream_name: String,
     ) -> Self {
@@ -152,6 +152,8 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
                 }
             };
 
+            let mut join_set = tokio::task::JoinSet::<Response<R>>::new();
+
             loop {
                 let async_nats::jetstream::Message {
                     message:
@@ -173,7 +175,6 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
                     None => return true,
                 };
 
-                print!("-");
                 let subject = subject.as_str();
                 let handler = match handler_consumers.get(subject) {
                     Some(x) => x.clone(),
@@ -187,7 +188,7 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
                 // this is costly, so more than an arc is not acceptible
                 let state = self.state.clone();
 
-                let msg_handle = tokio::spawn(async move {
+                join_set.spawn(async move {
                     let res = handler
                         .call(
                             HandlerRequest {
@@ -197,13 +198,40 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
                             state,
                         )
                         .await;
+                    // this might be a problem if this panics before the ack is send, e.g. the email is send, then it crashes.
                     match ack(&context, reply).await {
                         Ok(_) => {}
+                        // we probably want to retry the ack if we got to this point
                         Err(_) => todo!(),
                     }
                     res
                 });
-                // msg_handle.await.unwrap();
+
+                if join_set.len() > self.max_concurrent_tasks {
+                    log::info!(
+                        "Trigger cleanup event: {} > {}",
+                        join_set.len(),
+                        self.max_concurrent_tasks
+                    );
+
+                    while !join_set.is_empty() {
+                        log::debug!("join: {}", join_set.len());
+                        let Some(x) = join_set.try_join_next() else {
+                            break;
+                        };
+                        log::debug!("cleanup");
+                        let _rest = match x {
+                            Ok(x) => x,
+                            Err(x) => {
+                                log::error!(
+                                    "Something went wrong during the join the process: {}",
+                                    x
+                                );
+                                continue;
+                            }
+                        };
+                    }
+                }
             }
         });
 
