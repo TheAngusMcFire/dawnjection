@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, pin::Pin};
+use std::{collections::HashMap, marker::PhantomData, pin::Pin, sync::Arc};
 
 use futures::Future;
 
@@ -63,7 +63,7 @@ where
 //////////////////////////////  the handler registration  \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 
 pub struct HandlerRegistry<P, M, S, R> {
-    pub handlers: Vec<(String, Box<dyn HanderCall<P, M, S, R>>)>,
+    pub handlers: Vec<(String, Arc<dyn HanderCall<P, M, S, R> + Send + Sync>)>,
 }
 
 impl<P, M, S, R> Default for HandlerRegistry<P, M, S, R> {
@@ -119,7 +119,7 @@ impl<P: Send + 'static, M: Send + 'static, S: Send + 'static, R: Send + 'static>
     ) -> Self {
         self.handlers.push((
             name.into(),
-            Box::new(HandlerEndpoint {
+            Arc::new(HandlerEndpoint {
                 handler,
                 pd: Default::default(),
             }),
@@ -129,7 +129,7 @@ impl<P: Send + 'static, M: Send + 'static, S: Send + 'static, R: Send + 'static>
 }
 
 #[async_trait::async_trait]
-pub trait HanderCall<P, M, S, R>: Send {
+pub trait HanderCall<P, M, S, R>: Send + Sync {
     async fn call(&self, req: HandlerRequest<P, M>, state: S) -> Response<R>;
 }
 

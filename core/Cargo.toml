@@ -22,12 +22,13 @@ axum = { version = "0.6", optional = true }
 uuid = { version = "1.10", optional = true, features = ["v4"] }
 async-nats = { version = "0.35", optional = true }
 log = { version = "0.4", optional = true }
-env_logger = { version = "0.11", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
+bytes = "1.7.1"
 
 [dev-dependencies]
 tokio = {version="*", features = ["full"]}
 color-eyre = "*"
+env_logger = { version = "0.11", optional = false }
 
 [[example]]
 name = "axum"
