@@ -67,9 +67,12 @@ async fn simple_subscriber_other_topic(I(config): I<Config>, raw: Raw) {
 
 #[tokio::main]
 async fn main() -> Result<(), color_eyre::Report> {
+    env_logger::init();
+    color_eyre::install()?;
+
     let connection_string = std::env::var("NATS_CONNECTION_STRING")?;
     let subscriber_name = std::env::var("NATS_SUBSCRIBER_NAME")?;
-    env_logger::init();
+
     let consumer_registry =
         HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, ()>::default()
             .register(simple_consumer);
@@ -84,7 +87,8 @@ async fn main() -> Result<(), color_eyre::Report> {
             .register_with_name("topic2", simple_subscriber_other_topic);
 
     log::info!("Start the nats dispatcher");
-    let dispatcher = NatsDispatcher::new(
+
+    NatsDispatcher::new(
         consumer_registry,
         subscriber_registry,
         &connection_string,
@@ -96,9 +100,11 @@ async fn main() -> Result<(), color_eyre::Report> {
                 })
                 .build_service_provider_arc(),
         ),
-        "EVENTS1".into(),
+        "EVENTS".into(),
         subscriber_name,
-    );
-    dispatcher.start().await?;
+    )
+    .start()
+    .await?;
+
     Ok(())
 }

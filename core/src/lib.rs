@@ -101,9 +101,10 @@ impl ServiceCollection {
             panic!()
         }
     }
-    pub fn reg_cloneable<T: Sync + Send>(mut self, instance: T) -> Self
+    pub fn reg_cloneable<T>(mut self, instance: T) -> Self
     where
         T: Clone + 'static,
+        T: Sync + Send,
     {
         self.check_if_already_registered::<T>();
 
@@ -119,9 +120,10 @@ impl ServiceCollection {
         self
     }
 
-    pub fn reg_singleton<T: Sync + Send>(mut self, instance: T) -> Self
+    pub fn reg_singleton<T>(mut self, instance: T) -> Self
     where
         T: 'static,
+        T: Sync + Send,
     {
         self.check_if_already_registered::<T>();
         self.map.insert(
@@ -131,9 +133,10 @@ impl ServiceCollection {
         self
     }
 
-    pub fn reg_mutable_singleton<T: Sync + Send>(mut self, instance: T) -> Self
+    pub fn reg_mutable_singleton<T>(mut self, instance: T) -> Self
     where
         T: 'static,
+        T: Sync + Send,
     {
         self.check_if_already_registered::<T>();
         self.map.insert(
@@ -143,10 +146,10 @@ impl ServiceCollection {
         self
     }
 
-    pub fn reg_factory<T: 'static + Sync + Send>(
-        mut self,
-        factory: fn(&ServiceProvider) -> Option<T>,
-    ) -> Self {
+    pub fn reg_factory<T>(mut self, factory: fn(&ServiceProvider) -> Option<T>) -> Self
+    where
+        T: 'static + Sync + Send,
+    {
         self.check_if_already_registered::<T>();
         self.map.insert(
             std::any::TypeId::of::<T>(),
@@ -155,9 +158,10 @@ impl ServiceCollection {
         self
     }
 
-    pub fn reg_takeable<T: Sync + Send>(mut self, instance: T) -> Self
+    pub fn reg_takeable<T>(mut self, instance: T) -> Self
     where
         T: 'static,
+        T: Sync + Send,
     {
         self.check_if_already_registered::<T>();
         self.map.insert(
@@ -167,9 +171,10 @@ impl ServiceCollection {
         self
     }
 
-    pub fn register_takeable<T: Sync + Send>(&mut self, instance: T)
+    pub fn register_takeable<T>(&mut self, instance: T)
     where
         T: 'static,
+        T: Sync + Send,
     {
         self.check_if_already_registered::<T>();
         self.map.insert(
@@ -196,7 +201,7 @@ impl ServiceCollection {
 }
 
 pub trait IServiceProvider {
-    /* one shot function to move entry from di scope */
+    /// one shot function to move entry from di scope
     fn try_take<T: 'static>(&self) -> Option<T>;
     fn try_get<T: 'static>(&self) -> Option<T>;
     fn try_get_ref<T: 'static>(&self) -> Option<&T>;
@@ -230,11 +235,6 @@ impl ServiceProvider {
         self.scope_context.as_ref()?;
 
         let mut scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
-
-        match scope_map.get(&TypeId::of::<T>()) {
-            Some(ServiceDescriptor::Take(_)) => {}
-            _ => return None,
-        }
 
         match scope_map.remove(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::Take(taken)) => match taken.downcast::<T>() {
