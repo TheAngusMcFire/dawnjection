@@ -3,21 +3,17 @@
 // we might want to subscribe only for specific topics
 
 use async_nats::{
-    header::IntoHeaderName,
-    jetstream::{
-        self,
-        consumer::{self, PullConsumer},
-    },
-    Message, Subject,
+    jetstream::{self, consumer::PullConsumer},
+    Subject,
 };
 use eyre::bail;
 use itertools::{self, Itertools};
-use std::{collections::HashMap, str::Bytes, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 // use color_eyre::owo_colors::OwoColorize;
-use futures::{future::join_all, StreamExt};
+use futures::StreamExt;
 use tokio::task::JoinHandle;
 
-use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response};
+use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, Response};
 
 #[derive(Clone)]
 pub struct NatsPayload {
@@ -61,7 +57,7 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
 
     pub async fn start(self) -> Result<(), eyre::Report> {
         self.dispatch_loop().await?;
-        return Ok(());
+        Ok(())
     }
 
     async fn dispatch_loop(self) -> Result<(), eyre::Report> {

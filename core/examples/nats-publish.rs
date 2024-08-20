@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_nats::jetstream;
 
 #[tokio::main]

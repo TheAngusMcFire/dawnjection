@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, pin::Pin, sync::Arc};
+use std::{marker::PhantomData, pin::Pin, sync::Arc};
 
 use futures::Future;
 

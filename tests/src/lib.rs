@@ -1,8 +1,8 @@
-
-
 #[derive(Debug)]
 struct SomeStruct {}
-struct IncomingMessage<'r> {msg: &'r str}
+struct IncomingMessage<'r> {
+    msg: &'r str,
+}
 
 #[dawnjection_codegen::with_di]
 fn some_function(msg: String, cnt: u32, stru: &SomeStruct) {
@@ -24,7 +24,12 @@ fn di_codegen_int_tes() {
 }
 
 #[dawnjection_codegen::handler_with_di]
-async fn some_handler(imsg: IncomingMessage<'_>, msg: String, cnt: u32, stru: &SomeStruct) -> Result<(), dawnjection::Report> {
+async fn some_handler(
+    imsg: IncomingMessage<'_>,
+    msg: String,
+    cnt: u32,
+    stru: &SomeStruct,
+) -> Result<(), dawnjection::Report> {
     println!("{}  {}  {}  {:?}", imsg.msg, msg, cnt, stru);
     Ok(())
 }
@@ -33,14 +38,15 @@ async fn some_handler(imsg: IncomingMessage<'_>, msg: String, cnt: u32, stru: &S
 async fn handler_with_di_test() {
     let hndlr = some_handler::default().consumer_entry();
     let sp = dawnjection::ServiceCollection::default()
-        .reg_cloneable(format!("test"))
+        .reg_cloneable("test".to_string())
         .reg_cloneable(5_u32)
-        .reg_singleton(SomeStruct{})
+        .reg_singleton(SomeStruct {})
         .build_service_provider_arc();
 
-    let scope = sp.create_scope_arc(Some(    
-        dawnjection::ServiceCollection::default()
-        .reg_takeable(IncomingMessage { msg: "this is a test" })
+    let scope = sp.create_scope_arc(Some(
+        dawnjection::ServiceCollection::default().reg_takeable(IncomingMessage {
+            msg: "this is a test",
+        }),
     ));
 
     let ret = (hndlr.handler)(scope);

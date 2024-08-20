@@ -1,6 +1,3 @@
-use std::marker::PhantomData;
-
-use color_eyre::owo_colors::OwoColorize;
 use dawnjection::{
     handler::{FromRequestBody, HandlerRegistry, HandlerRequest},
     nats::{NatsDispatcher, NatsMetadata, NatsPayload},
