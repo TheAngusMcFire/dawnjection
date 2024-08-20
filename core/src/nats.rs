@@ -3,7 +3,7 @@
 // we might want to subscribe only for specific topics
 
 use async_nats::{
-    jetstream::{self, consumer::PullConsumer},
+    jetstream::{self, consumer::PullConsumer, context::CreateStreamErrorKind},
     Subject,
 };
 use eyre::bail;
@@ -93,8 +93,9 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
 
         let client = async_nats::connect(&self.connection_string).await?;
         let jetstream = jetstream::new(client);
+
         let stream = jetstream
-            .create_stream(jetstream::stream::Config {
+            .get_or_create_stream(jetstream::stream::Config {
                 name: self.stream_name.clone(),
                 retention: jetstream::stream::RetentionPolicy::Interest,
                 subjects: all_subjects,

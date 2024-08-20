@@ -9,7 +9,7 @@ use async_nats::jetstream;
 async fn main() -> Result<(), color_eyre::Report> {
     env_logger::init();
     let cnt = Arc::new(AtomicUsize::new(0));
-    for n in 0..5 {
+    for n in 0..1 {
         let acnt = cnt.clone();
         tokio::spawn(async move {
             let connection_string = std::env::var("NATS_CONNECTION_STRING").unwrap();
@@ -18,7 +18,7 @@ async fn main() -> Result<(), color_eyre::Report> {
             for i in 0..10000000 {
                 let ret = js
                     .publish(
-                        "topic2".to_string(),
+                        "topic1".to_string(),
                         bytes::Bytes::from(format!(
                             "this is the message: {}",
                             acnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -26,11 +26,11 @@ async fn main() -> Result<(), color_eyre::Report> {
                     )
                     .await
                     .unwrap();
-                // let res = ret.await.unwrap();
-                // tokio::time::sleep(Duration::from_millis(1000)).await;
+                let res = ret.await.unwrap();
+                tokio::time::sleep(Duration::from_millis(1000)).await;
             }
         });
     }
-    tokio::time::sleep(Duration::from_secs(60)).await;
+    tokio::time::sleep(Duration::from_secs(600)).await;
     Ok(())
 }

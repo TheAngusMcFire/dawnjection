@@ -40,6 +40,21 @@ async fn simple_subscriber_two(I(config): I<Config>, raw: Raw) {
     println!("config value: {} message payload\n{}", config.msg, raw.0);
 }
 
+async fn simple_subscriber_three(I(config): I<Config>, raw: Raw) {
+    println!(stringify!(simple_subscriber_three));
+    println!("config value: {} message payload\n{}", config.msg, raw.0);
+}
+
+async fn simple_subscriber_four(I(config): I<Config>, raw: Raw) {
+    println!(stringify!(simple_subscriber_four));
+    println!("config value: {} message payload\n{}", config.msg, raw.0);
+}
+
+async fn simple_subscriber_five(I(config): I<Config>, raw: Raw) {
+    println!(stringify!(simple_subscriber_five));
+    println!("config value: {} message payload\n{}", config.msg, raw.0);
+}
+
 async fn simple_subscriber_other_topic(I(config): I<Config>, raw: Raw) {
     println!(stringify!(simple_subscriber_other_topic));
     println!("config value: {} message payload\n{}", config.msg, raw.0);
@@ -48,6 +63,7 @@ async fn simple_subscriber_other_topic(I(config): I<Config>, raw: Raw) {
 #[tokio::main]
 async fn main() -> Result<(), color_eyre::Report> {
     let connection_string = std::env::var("NATS_CONNECTION_STRING")?;
+    let subscriber_name = std::env::var("NATS_SUBSCRIBER_NAME")?;
     env_logger::init();
     let consumer_registry =
         HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, ()>::default()
@@ -57,6 +73,9 @@ async fn main() -> Result<(), color_eyre::Report> {
         HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, ()>::default()
             .register_with_name("topic1", simple_subscriber_one)
             .register_with_name("topic1", simple_subscriber_two)
+            .register_with_name("topic3", simple_subscriber_three)
+            .register_with_name("topic4", simple_subscriber_four)
+            .register_with_name("topic5", simple_subscriber_five)
             .register_with_name("topic2", simple_subscriber_other_topic);
 
     log::info!("Start the nats dispatcher");
@@ -73,7 +92,7 @@ async fn main() -> Result<(), color_eyre::Report> {
                 .build_service_provider_arc(),
         ),
         "EVENTS1".into(),
-        "subscriber4".into(),
+        subscriber_name,
     );
     dispatcher.start().await?;
     Ok(())
