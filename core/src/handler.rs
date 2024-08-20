@@ -2,7 +2,7 @@ use std::{marker::PhantomData, pin::Pin, sync::Arc};
 
 use futures::Future;
 
-use crate::{ServiceProviderAccess, I};
+use crate::{ServiceProviderAccess, ServiceProviderContainer, I};
 
 #[rustfmt::skip]
 macro_rules! all_the_tuples {
@@ -57,6 +57,19 @@ where
         Ok(crate::R::new(crate::ServiceProviderContainer(
             state.get_sp_arc().clone(),
         )))
+    }
+}
+
+// in case someone wants the whole Service provider within a service, this might be useful for workers
+#[async_trait::async_trait]
+impl<S, M, R> FromRequestMetadata<S, M, R> for ServiceProviderContainer
+where
+    S: Send + Sync + ServiceProviderAccess,
+{
+    type Rejection = Result<R, eyre::Report>;
+
+    async fn from_request_parts(_parts: &mut M, state: &S) -> Result<Self, Self::Rejection> {
+        Ok(ServiceProviderContainer(state.get_sp_arc().clone()))
     }
 }
 

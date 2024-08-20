@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use dawnjection::{
     handler::{FromRequestBody, HandlerRegistry, HandlerRequest},
     nats::{NatsDispatcher, NatsMetadata, NatsPayload},
@@ -33,11 +35,13 @@ async fn simple_consumer(I(config): I<Config>, raw: Raw) {
 async fn simple_subscriber_one(I(config): I<Config>, raw: Raw) {
     println!(stringify!(simple_subscriber_one));
     println!("config value: {} message payload\n{}", config.msg, raw.0);
+    tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 async fn simple_subscriber_two(I(config): I<Config>, raw: Raw) {
     println!(stringify!(simple_subscriber_two));
     println!("config value: {} message payload\n{}", config.msg, raw.0);
+    tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 async fn simple_subscriber_three(I(config): I<Config>, raw: Raw) {
@@ -58,6 +62,7 @@ async fn simple_subscriber_five(I(config): I<Config>, raw: Raw) {
 async fn simple_subscriber_other_topic(I(config): I<Config>, raw: Raw) {
     println!(stringify!(simple_subscriber_other_topic));
     println!("config value: {} message payload\n{}", config.msg, raw.0);
+    tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 #[tokio::main]
@@ -83,7 +88,7 @@ async fn main() -> Result<(), color_eyre::Report> {
         consumer_registry,
         subscriber_registry,
         &connection_string,
-        1000,
+        16,
         ServiceProviderContainer(
             ServiceCollection::default()
                 .reg_cloneable(Config {

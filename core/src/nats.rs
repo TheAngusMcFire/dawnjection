@@ -3,13 +3,13 @@
 // we might want to subscribe only for specific topics
 
 use async_nats::{
-    jetstream::{self, consumer::PullConsumer, context::CreateStreamErrorKind},
+    jetstream::{self, consumer::PullConsumer},
     Subject,
 };
 use eyre::bail;
 use itertools::{self, Itertools};
-use std::{collections::HashMap, sync::Arc};
-// use color_eyre::owo_colors::OwoColorize;
+use std::{collections::HashMap, sync::Arc, time::Duration};
+
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 
@@ -23,12 +23,13 @@ pub struct NatsPayload {
 pub struct NatsMetadata {}
 
 pub struct NatsDispatcher<P, M, S, R> {
-    // message is send to one singele consumer, but there might be multiple consumers
-    // use case: send email, process single task
+    /// message is send to one singele consumer, but there might be multiple consumers
+    /// use case: send email, process single task
     consumers: HandlerRegistry<P, M, S, R>,
-    // different subscibers can subscribe to the same toppic
-    // use case: multiple things to do with one data point e.g. one which analyzes the data point and one which saves it.
+    /// different subscibers can subscribe to the same toppic
+    /// use case: multiple things to do with one data point e.g. one which analyzes the data point and one which saves it.
     subscribers: HandlerRegistry<P, M, S, R>,
+    /// the max amount of tasks to spawn (the same for subscriber and consumer, so if the value is 8 16 tasks can run at the same time)
     max_concurrent_tasks: usize,
     connection_string: String,
     state: S,
@@ -113,16 +114,17 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
             })
             .await?;
 
-        log::info!("created consumer");
+        log::info!("created consumer whith name: consumer");
 
         let subscriber: PullConsumer = stream
             .create_consumer(jetstream::consumer::pull::Config {
-                durable_name: Some(self.subscriber_name),
+                durable_name: Some(self.subscriber_name.clone()),
                 ..Default::default()
             })
             .await?;
 
-        log::info!("created subscriber");
+        log::info!("created subscriber with name: {}", self.subscriber_name);
+
         // we build some HashMaps for consumers and subscribers to speed up the handler lookup
         let handler_consumers = self
             .consumers
@@ -155,8 +157,6 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
             self.state.clone(),
             self.max_concurrent_tasks,
         );
-
-        // let _res = consuemer_join_handle.await;
 
         let result = tokio::join!(consuemer_join_handle, subscriber_join_handle);
 
@@ -237,6 +237,8 @@ pub fn start_subscriber_dispatcher<S: Clone + Send + 'static, R: Send + 'static>
                 }
             }
 
+            // we ack all of the subjects at once, retransmissions of whole subjects might lead to more problems
+            // because every subscriber would need to handle retransmission logic
             match ack(&context, &reply).await {
                 Ok(_) => {}
                 // we probably want to retry the ack if we got to this point
@@ -248,20 +250,12 @@ pub fn start_subscriber_dispatcher<S: Clone + Send + 'static, R: Send + 'static>
                     );
                 }
             }
-            // we cleanup the spawned tasks so when self.max_consurrent_tasks is reached
-            if join_set.len() > max_concurrent_tasks {
-                log::debug!(
-                    "Trigger cleanup event: {} > {}",
-                    join_set.len(),
-                    max_concurrent_tasks
-                );
 
-                while !join_set.is_empty() {
-                    log::debug!("join: {}", join_set.len());
-                    let Some(x) = join_set.try_join_next() else {
-                        break;
-                    };
-                    log::debug!("cleanup");
+            // perform garbage collection, everything after this while is running probably
+            let mut wait_loop = false;
+            loop {
+                while let Some(x) = join_set.try_join_next() {
+                    // r.f.u maybe we can do something with the reponse in the future
                     let _rest = match x {
                         Ok(x) => x,
                         Err(x) => {
@@ -270,6 +264,16 @@ pub fn start_subscriber_dispatcher<S: Clone + Send + 'static, R: Send + 'static>
                         }
                     };
                 }
+
+                // if there are more active tasks in the queue, we wait until there is space
+                if join_set.len() < max_concurrent_tasks {
+                    break;
+                } else if !wait_loop {
+                    wait_loop = true;
+                    log::info!("Too much running Tasks, wait for some to finish");
+                }
+
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
     });
@@ -355,20 +359,11 @@ pub fn start_consumer_dispatcher<S: Clone + Send + 'static, R: Send + 'static>(
                 res
             });
 
-            // we cleanup the spawned tasks so when self.max_consurrent_tasks is reached
-            if join_set.len() > max_concurrent_tasks {
-                log::debug!(
-                    "Trigger cleanup event: {} > {}",
-                    join_set.len(),
-                    max_concurrent_tasks
-                );
-
-                while !join_set.is_empty() {
-                    log::debug!("join: {}", join_set.len());
-                    let Some(x) = join_set.try_join_next() else {
-                        break;
-                    };
-                    log::debug!("cleanup");
+            // perform garbage collection, everything after this while is running probably
+            let mut wait_loop = false;
+            loop {
+                while let Some(x) = join_set.try_join_next() {
+                    // r.f.u maybe we can do something with the reponse in the future
                     let _rest = match x {
                         Ok(x) => x,
                         Err(x) => {
@@ -377,6 +372,16 @@ pub fn start_consumer_dispatcher<S: Clone + Send + 'static, R: Send + 'static>(
                         }
                     };
                 }
+
+                // if there are more active tasks in the queue, we wait until there is space
+                if join_set.len() < max_concurrent_tasks {
+                    break;
+                } else if !wait_loop {
+                    wait_loop = true;
+                    log::info!("Too much running Tasks, wait for some to finish");
+                }
+
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
     });
@@ -398,7 +403,6 @@ pub async fn ack(
 
 #[cfg(test)]
 mod test {
-
     async fn this_is_a_test() {}
 
     #[test]
