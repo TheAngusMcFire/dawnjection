@@ -12,25 +12,7 @@ pub struct Config {
     msg: &'static str,
 }
 
-// todo remove at some point
-// trait implementations:
-// trait from other crates can only be implemented for types of this crate
-// trait implementations for other crates can only be done within the crate its defined
-
-// retrieves data from the Message metadata and the state
-
-// This example can be used to deserialize some object into some message
-// pub struct Mp<T>(String, PhantomData<T>);
-// #[async_trait::async_trait]
-// impl<T> FromRequestBody<ServiceProviderContainer, Body, Meta, String> for Mp<T> {
-//     type Rejection = Result<String, eyre::Report>;
-//     async fn from_request(
-//         req: HandlerRequest<Body, Meta>,
-//         _state: &ServiceProviderContainer,
-//     ) -> Result<Self, Self::Rejection> {
-//         Ok(Mp(req.payload.incomming_message, Default::default()))
-//     }
-// }
+pub struct Raw(String);
 #[async_trait::async_trait]
 impl FromRequestBody<ServiceProviderContainer, NatsPayload, NatsMetadata, ()> for Raw {
     type Rejection = Result<(), eyre::Report>;
@@ -42,23 +24,45 @@ impl FromRequestBody<ServiceProviderContainer, NatsPayload, NatsMetadata, ()> fo
         Ok(Raw(msg))
     }
 }
-pub struct Raw(String);
-async fn test(I(config): I<Config>, raw: Raw) {
-    // println!(stringify!(first_handler_which_does_nothing));
-    // println!("config value: {} message payload\n{}", config.msg, raw.0);
+
+async fn simple_consumer(I(config): I<Config>, raw: Raw) {
+    println!(stringify!(simple_consumer));
+    println!("config value: {} message payload\n{}", config.msg, raw.0);
+}
+
+async fn simple_subscriber_one(I(config): I<Config>, raw: Raw) {
+    println!(stringify!(simple_subscriber_one));
+    println!("config value: {} message payload\n{}", config.msg, raw.0);
+}
+
+async fn simple_subscriber_two(I(config): I<Config>, raw: Raw) {
+    println!(stringify!(simple_subscriber_two));
+    println!("config value: {} message payload\n{}", config.msg, raw.0);
+}
+
+async fn simple_subscriber_other_topic(I(config): I<Config>, raw: Raw) {
+    println!(stringify!(simple_subscriber_other_topic));
+    println!("config value: {} message payload\n{}", config.msg, raw.0);
 }
 
 #[tokio::main]
 async fn main() -> Result<(), color_eyre::Report> {
     let connection_string = std::env::var("NATS_CONNECTION_STRING")?;
     env_logger::init();
-    let reg = HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, ()>::default()
-        .register(test);
+    let consumer_registry =
+        HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, ()>::default()
+            .register(simple_consumer);
+
+    let subscriber_registry =
+        HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, ()>::default()
+            .register_with_name("topic1", simple_subscriber_one)
+            .register_with_name("topic1", simple_subscriber_two)
+            .register_with_name("topic2", simple_subscriber_other_topic);
 
     log::info!("Start the nats dispatcher");
     let dispatcher = NatsDispatcher::new(
-        reg,
-        Default::default(),
+        consumer_registry,
+        subscriber_registry,
         &connection_string,
         1000,
         ServiceProviderContainer(
@@ -68,7 +72,8 @@ async fn main() -> Result<(), color_eyre::Report> {
                 })
                 .build_service_provider_arc(),
         ),
-        "EVENTS".into(),
+        "EVENTS1".into(),
+        "subscriber4".into(),
     );
     dispatcher.start().await?;
     Ok(())

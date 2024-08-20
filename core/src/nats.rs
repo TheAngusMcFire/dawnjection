@@ -33,6 +33,7 @@ pub struct NatsDispatcher<P, M, S, R> {
     connection_string: String,
     state: S,
     stream_name: String,
+    subscriber_name: String,
 }
 
 // we also should implement some means of clean shutdown
@@ -44,6 +45,8 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
         max_concurrent_tasks: usize,
         state: S,
         stream_name: String,
+        // this needs to be unique for ervery Service which wants to subscribe to topics
+        subscriber_name: String,
     ) -> Self {
         Self {
             consumers,
@@ -52,6 +55,7 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
             connection_string: connection_string.into(),
             state,
             stream_name,
+            subscriber_name,
         }
     }
 
@@ -83,9 +87,9 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
         all_subjects.extend_from_slice(&consumer_subjects);
         all_subjects.dedup();
 
-        log::info!("all subjects:       {:?}", all_subjects);
-        log::info!("subscriber_subjects {:?}", subscriber_subjects);
-        log::info!("conumer_subjects    {:?}", consumer_subjects);
+        log::info!("all subjects:        {:?}", all_subjects);
+        log::info!("subscriber_subjects: {:?}", subscriber_subjects);
+        log::info!("conumer_subjects:    {:?}", consumer_subjects);
 
         let client = async_nats::connect(&self.connection_string).await?;
         let jetstream = jetstream::new(client);
@@ -100,25 +104,6 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
 
         log::info!("created stream");
 
-        // the next thing is not race condition safe... this is really not good
-        let mut consumer_names = Vec::<String>::new();
-        let mut cni = stream.consumer_names();
-        while let Some(x) = cni.next().await {
-            dbg!(&x);
-            consumer_names.push(x?);
-        }
-
-        log::info!("read consumer names: {:?}", consumer_names);
-
-        let subscriber_name = (0..1000)
-            .map(|_| format!("subscriber{}", uuid::Uuid::new_v4()))
-            .find(|x| !consumer_names.contains(x))
-            .expect(
-                "OMG, the odds of that happening are super small, you are the luckiest person ever",
-            );
-
-        log::info!("used supscriber name: {}", subscriber_name);
-
         let consumer: PullConsumer = stream
             .create_consumer(jetstream::consumer::pull::Config {
                 durable_name: Some("consumer".to_string()),
@@ -131,12 +116,13 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
 
         let subscriber: PullConsumer = stream
             .create_consumer(jetstream::consumer::pull::Config {
-                durable_name: Some(subscriber_name),
+                durable_name: Some(self.subscriber_name),
                 ..Default::default()
             })
             .await?;
 
         log::info!("created subscriber");
+        // we build some HashMaps for consumers and subscribers to speed up the handler lookup
         let handler_consumers = self
             .consumers
             .handlers
