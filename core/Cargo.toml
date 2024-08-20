@@ -24,6 +24,7 @@ async-nats = { version = "0.35", optional = true }
 log = { version = "0.4", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
 bytes = "1.7.1"
+itertools = "0.13.0"
 
 [dev-dependencies]
 tokio = {version="*", features = ["full"]}

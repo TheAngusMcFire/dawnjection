@@ -2,8 +2,6 @@
 // setting for max concurrent tasks
 // we might want to subscribe only for specific topics
 
-use std::{collections::HashMap, str::Bytes, sync::Arc};
-
 use async_nats::{
     header::IntoHeaderName,
     jetstream::{
@@ -13,14 +11,19 @@ use async_nats::{
     Message, Subject,
 };
 use eyre::bail;
+use itertools::{self, Itertools};
+use std::{collections::HashMap, str::Bytes, sync::Arc};
 // use color_eyre::owo_colors::OwoColorize;
 use futures::{future::join_all, StreamExt};
+use tokio::task::JoinHandle;
 
-use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, Response};
+use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response};
 
+#[derive(Clone)]
 pub struct NatsPayload {
     pub data: bytes::Bytes,
 }
+#[derive(Clone)]
 pub struct NatsMetadata {}
 
 pub struct NatsDispatcher<P, M, S, R> {
@@ -36,6 +39,7 @@ pub struct NatsDispatcher<P, M, S, R> {
     stream_name: String,
 }
 
+// we also should implement some means of clean shutdown
 impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, NatsMetadata, S, R> {
     pub fn new(
         consumers: HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
@@ -143,131 +147,263 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
             .into_iter()
             .collect::<HashMap<String, Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>>();
 
-        let consumer_handle = tokio::spawn(async move {
-            let mut msg_iter = match consumer.messages().await {
-                Ok(x) => x,
-                Err(x) => {
-                    log::error!("Error during creation of the message stream: {}", x);
-                    return false;
-                }
-            };
+        let handler_subscribers = self
+            .subscribers
+            .handlers
+            .into_iter()
+            .into_group_map_by(|x| x.0.clone())
+            .iter()
+            .map(|x| (x.0.clone(), x.1.iter().map(|x| x.1.clone()).collect::<Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>>()))
+            .collect::<HashMap<
+                String,
+                Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>,
+            >>();
 
-            let mut join_set = tokio::task::JoinSet::<Response<R>>::new();
+        let consuemer_join_handle = start_consumer_dispatcher(
+            consumer,
+            handler_consumers,
+            self.state.clone(),
+            self.max_concurrent_tasks,
+        );
 
-            loop {
-                let async_nats::jetstream::Message {
-                    message:
-                        async_nats::Message {
-                            subject,
-                            payload,
-                            reply,
-                            ..
-                        },
-                    context,
-                } = match msg_iter.next().await {
-                    Some(x) => match x {
-                        Ok(x) => x,
-                        Err(e) => {
-                            log::error!("Error in recieved message: {}", e);
-                            continue;
-                        }
-                    },
-                    None => return true,
-                };
+        let subscriber_join_handle = start_subscriber_dispatcher(
+            subscriber,
+            handler_subscribers,
+            self.state.clone(),
+            self.max_concurrent_tasks,
+        );
 
-                let subject = subject.as_str();
-                let handler = match handler_consumers.get(subject) {
-                    Some(x) => x.clone(),
-                    None => {
-                        log::error!("There is no registered handler for subject: {}", subject);
-                        continue;
-                    }
-                };
+        // let _res = consuemer_join_handle.await;
 
-                let (pl, mt) = (NatsPayload { data: payload }, NatsMetadata {});
-                // this is costly, so more than an arc is not acceptible
-                let state = self.state.clone();
+        let result = tokio::join!(consuemer_join_handle, subscriber_join_handle);
 
-                join_set.spawn(async move {
-                    let res = handler
-                        .call(
-                            HandlerRequest {
-                                payload: pl,
-                                metadata: mt,
-                            },
-                            state,
-                        )
-                        .await;
-                    // this might be a problem if this panics before the ack is send, e.g. the email is send, then it crashes.
-                    match ack(&context, reply).await {
-                        Ok(_) => {}
-                        // we probably want to retry the ack if we got to this point
-                        Err(_) => todo!(),
-                    }
-                    res
-                });
-
-                if join_set.len() > self.max_concurrent_tasks {
-                    log::info!(
-                        "Trigger cleanup event: {} > {}",
-                        join_set.len(),
-                        self.max_concurrent_tasks
-                    );
-
-                    while !join_set.is_empty() {
-                        log::debug!("join: {}", join_set.len());
-                        let Some(x) = join_set.try_join_next() else {
-                            break;
-                        };
-                        log::debug!("cleanup");
-                        let _rest = match x {
-                            Ok(x) => x,
-                            Err(x) => {
-                                log::error!(
-                                    "Something went wrong during the join the process: {}",
-                                    x
-                                );
-                                continue;
-                            }
-                        };
-                    }
-                }
-            }
-        });
-
-        let rest = consumer_handle.await;
-
-        // println!("consumer name: {:?}", stream.consumer_names().next().await);
-        // println!(
-        //     "consumer name: {:?}",
-        //     stream.consumer_names().skip(1).next().await
-        // );
-        // println!(
-        //     "consumer name: {:?}",
-        //     stream.consumer_names().skip(2).next().await
-        // );
-
-        // let consumer: PullConsumer = stream
-        //     .create_consumer(jetstream::consumer::pull::Config {
-        //         durable_name: Some("consumer2".to_string()),
-        //         ..Default::default()
-        //     })
-        //     .await?; // client.
-
-        // while let Some(msg) = consumer.messages().await?.next().await {
-        //     let msg = msg?;
-        //     dbg!(&msg.subject);
-        //     dbg!(&msg.message);
-        //     let ret = msg.ack().await;
-        // }
+        log::error!(
+            "Error during joining of the main dispatch loops: {:?}",
+            result
+        );
 
         Ok(())
     }
 }
 
+pub fn start_subscriber_dispatcher<S: Clone + Send + 'static, R: Send + 'static>(
+    consumer: PullConsumer,
+    handler_consumers: HashMap<
+        String,
+        Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>,
+    >,
+    state: S,
+    max_concurrent_tasks: usize,
+) -> JoinHandle<bool> {
+    let handle = tokio::spawn(async move {
+        let mut msg_iter = match consumer.messages().await {
+            Ok(x) => x,
+            Err(x) => {
+                log::error!("Error during creation of the message stream: {}", x);
+                return false;
+            }
+        };
+        let mut join_set = tokio::task::JoinSet::<Response<R>>::new();
+
+        loop {
+            let async_nats::jetstream::Message {
+                message:
+                    async_nats::Message {
+                        subject,
+                        payload,
+                        reply,
+                        ..
+                    },
+                context,
+            } = match msg_iter.next().await {
+                Some(x) => match x {
+                    Ok(x) => x,
+                    Err(e) => {
+                        log::error!("Error in recieved message: {}", e);
+                        continue;
+                    }
+                },
+                None => return true,
+            };
+
+            let subject = subject.as_str();
+            let handlers = match handler_consumers.get(subject) {
+                Some(x) => x.clone(),
+                None => {
+                    log::error!("There is no registered handler for subject: {}", subject);
+                    continue;
+                }
+            };
+
+            let (pl, mt) = (NatsPayload { data: payload }, NatsMetadata {});
+            let req = HandlerRequest {
+                payload: pl,
+                metadata: mt,
+            };
+
+            // the check is to prevent to clone the request if only one copy is needed
+            if handlers.len() == 1 {
+                let handler = handlers.first().expect("there should be a check").clone();
+                let state = state.clone();
+                join_set.spawn(async move { handler.call(req, state).await });
+            } else {
+                for handler in handlers {
+                    let state = state.clone();
+                    let req = req.clone();
+                    join_set.spawn(async move { handler.call(req, state).await });
+                }
+            }
+
+            match ack(&context, &reply).await {
+                Ok(_) => {}
+                // we probably want to retry the ack if we got to this point
+                Err(x) => {
+                    log::error!(
+                        "Error during acking (message id: {:?}) of the message: {}",
+                        reply,
+                        x
+                    );
+                }
+            }
+            // we cleanup the spawned tasks so when self.max_consurrent_tasks is reached
+            if join_set.len() > max_concurrent_tasks {
+                log::debug!(
+                    "Trigger cleanup event: {} > {}",
+                    join_set.len(),
+                    max_concurrent_tasks
+                );
+
+                while !join_set.is_empty() {
+                    log::debug!("join: {}", join_set.len());
+                    let Some(x) = join_set.try_join_next() else {
+                        break;
+                    };
+                    log::debug!("cleanup");
+                    let _rest = match x {
+                        Ok(x) => x,
+                        Err(x) => {
+                            log::error!("Something went wrong during the join the process: {}", x);
+                            continue;
+                        }
+                    };
+                }
+            }
+        }
+    });
+    handle
+}
+
+pub fn start_consumer_dispatcher<S: Clone + Send + 'static, R: Send + 'static>(
+    consumer: PullConsumer,
+    handler_consumers: HashMap<
+        String,
+        Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>,
+    >,
+    state: S,
+    max_concurrent_tasks: usize,
+) -> JoinHandle<bool> {
+    let handle = tokio::spawn(async move {
+        let mut msg_iter = match consumer.messages().await {
+            Ok(x) => x,
+            Err(x) => {
+                log::error!("Error during creation of the message stream: {}", x);
+                return false;
+            }
+        };
+
+        let mut join_set = tokio::task::JoinSet::<Response<R>>::new();
+
+        loop {
+            let async_nats::jetstream::Message {
+                message:
+                    async_nats::Message {
+                        subject,
+                        payload,
+                        reply,
+                        ..
+                    },
+                context,
+            } = match msg_iter.next().await {
+                Some(x) => match x {
+                    Ok(x) => x,
+                    Err(e) => {
+                        log::error!("Error in recieved message: {}", e);
+                        continue;
+                    }
+                },
+                None => return true,
+            };
+
+            let subject = subject.as_str();
+            let handler = match handler_consumers.get(subject) {
+                Some(x) => x.clone(),
+                None => {
+                    log::error!("There is no registered handler for subject: {}", subject);
+                    continue;
+                }
+            };
+
+            let (pl, mt) = (NatsPayload { data: payload }, NatsMetadata {});
+            // this is costly, so more than an arc is not acceptible
+            let state = state.clone();
+
+            join_set.spawn(async move {
+                let res = handler
+                    .call(
+                        HandlerRequest {
+                            payload: pl,
+                            metadata: mt,
+                        },
+                        state,
+                    )
+                    .await;
+                // this might be a problem if this panics before the ack is send, e.g. the email is send, then it crashes.
+                match ack(&context, &reply).await {
+                    Ok(_) => {}
+                    // we probably want to retry the ack if we got to this point
+                    Err(x) => {
+                        log::error!(
+                            "Error during acking (message id: {:?}) of the message: {}",
+                            reply,
+                            x
+                        );
+                    }
+                }
+                res
+            });
+
+            // we cleanup the spawned tasks so when self.max_consurrent_tasks is reached
+            if join_set.len() > max_concurrent_tasks {
+                log::debug!(
+                    "Trigger cleanup event: {} > {}",
+                    join_set.len(),
+                    max_concurrent_tasks
+                );
+
+                while !join_set.is_empty() {
+                    log::debug!("join: {}", join_set.len());
+                    let Some(x) = join_set.try_join_next() else {
+                        break;
+                    };
+                    log::debug!("cleanup");
+                    let _rest = match x {
+                        Ok(x) => x,
+                        Err(x) => {
+                            log::error!("Something went wrong during the join the process: {}", x);
+                            continue;
+                        }
+                    };
+                }
+            }
+        }
+    });
+
+    handle
+}
+
 pub async fn ack(
     context: &async_nats::jetstream::Context,
-    reply: Option<Subject>,
+    reply: &Option<Subject>,
 ) -> Result<(), eyre::Report> {
     if let Some(ref reply) = reply {
         context.publish(reply.clone(), "".into()).await?;
