@@ -88,7 +88,7 @@ async fn subscribe() -> Result<(), color_eyre::Report> {
 
     let mut msg = consumer.messages().await?;
 
-    while let Some(mut t) = msg.next().await {
+    while let Some(t) = msg.next().await {
         let t = t?;
         dbg!(&t.payload);
         dbg!(&t.subject);
