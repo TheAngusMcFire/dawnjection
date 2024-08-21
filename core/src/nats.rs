@@ -3,7 +3,7 @@
 // we might want to subscribe only for specific topics
 
 use async_nats::{
-    jetstream::{self, consumer::PullConsumer},
+    jetstream::{self, consumer::PullConsumer, Context},
     Subject,
 };
 use eyre::bail;
@@ -19,6 +19,12 @@ use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, Response};
 pub struct NatsPayload {
     pub data: bytes::Bytes,
 }
+
+#[derive(Clone)]
+pub struct NatsResponse {
+    pub data: Option<bytes::Bytes>,
+}
+
 #[derive(Clone)]
 pub struct NatsMetadata {}
 
@@ -37,8 +43,127 @@ pub struct NatsDispatcher<P, M, S, R> {
     subscriber_name: String,
 }
 
+#[async_trait::async_trait]
+pub trait IntoNatsResponse {
+    async fn into_nats_response(self) -> NatsResponse;
+}
+
+#[async_trait::async_trait]
+impl IntoNatsResponse for () {
+    async fn into_nats_response(self) -> NatsResponse {
+        NatsResponse { data: None }
+    }
+}
+
+// hm this conflicts with the implementation for (), very funny...
+// #[async_trait::async_trait]
+// impl<T: Send + Into<bytes::Bytes>> IntoNatsResponse for T {
+//     async fn into_nats_response(self) -> NatsResponse {
+//         NatsResponse {
+//             data: Some(self.into()),
+//         }
+//     }
+// }
+
+#[async_trait::async_trait]
+trait NatsMessageProvider {
+    async fn get_nats_message(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Subject,
+            Option<Subject>,
+            bytes::Bytes,
+            Box<dyn NatsMessageAcker>,
+        )>,
+        eyre::Report,
+    >;
+    async fn reply_nats_message(
+        &self,
+        reply: Subject,
+        payload: bytes::Bytes,
+    ) -> Result<(), eyre::Report>;
+}
+
+#[async_trait::async_trait]
+trait NatsMessageAcker: Send + Sync {
+    async fn ack_message(&self) -> Result<(), eyre::Report>;
+}
+
+struct JetStreamNatsMessageAcker {
+    reply: Option<Subject>,
+    context: Context,
+}
+
+#[async_trait::async_trait]
+impl NatsMessageAcker for JetStreamNatsMessageAcker {
+    async fn ack_message(&self) -> Result<(), eyre::Report> {
+        ack(&self.context, &self.reply).await?;
+        Ok(())
+    }
+}
+
+struct JetStreamNatsMessageProvider {
+    stream: jetstream::consumer::pull::Stream,
+}
+
+impl JetStreamNatsMessageProvider {
+    async fn new(consumer: PullConsumer) -> Result<Self, eyre::Report> {
+        let msg_iter = consumer.messages().await?;
+        Ok(Self { stream: msg_iter })
+    }
+}
+
+#[async_trait::async_trait]
+impl NatsMessageProvider for JetStreamNatsMessageProvider {
+    async fn get_nats_message(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Subject,
+            Option<Subject>,
+            bytes::Bytes,
+            Box<dyn NatsMessageAcker>,
+        )>,
+        eyre::Report,
+    > {
+        let async_nats::jetstream::Message {
+            message:
+                async_nats::Message {
+                    subject,
+                    payload,
+                    reply,
+                    ..
+                },
+            context,
+        } = match self.stream.next().await {
+            Some(x) => match x {
+                Ok(x) => x,
+                Err(e) => return Err(e.into()),
+            },
+            None => return Ok(None),
+        };
+        Ok(Some((
+            subject,
+            reply.clone(),
+            payload,
+            Box::new(JetStreamNatsMessageAcker { reply, context }),
+        )))
+    }
+
+    async fn reply_nats_message(
+        &self,
+        reply: Subject,
+        payload: bytes::Bytes,
+    ) -> Result<(), eyre::Report> {
+        todo!()
+    }
+}
+
 // we also should implement some means of clean shutdown
-impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, NatsMetadata, S, R> {
+impl<S: Clone + 'static + Send, R: IntoNatsResponse + 'static + Send>
+    NatsDispatcher<NatsPayload, NatsMetadata, S, R>
+{
     pub fn new(
         consumers: HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
         subscribers: HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
@@ -125,34 +250,19 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
 
         log::info!("created subscriber with name: {}", self.subscriber_name);
 
-        // we build some HashMaps for consumers and subscribers to speed up the handler lookup
-        let handler_consumers = self
-            .consumers
-            .handlers
-            .into_iter()
-            .collect::<HashMap<String, Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>>();
+        let handler_consumers = self.build_consumer_handlers();
 
-        let handler_subscribers = self
-            .subscribers
-            .handlers
-            .into_iter()
-            .into_group_map_by(|x| x.0.clone())
-            .iter()
-            .map(|x| (x.0.clone(), x.1.iter().map(|x| x.1.clone()).collect::<Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>>()))
-            .collect::<HashMap<
-                String,
-                Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>,
-            >>();
+        let handler_subscribers = self.build_subscriber_handlers();
 
         let consuemer_join_handle = start_consumer_dispatcher(
-            consumer,
+            JetStreamNatsMessageProvider::new(consumer).await?,
             handler_consumers,
             self.state.clone(),
             self.max_concurrent_tasks,
         );
 
         let subscriber_join_handle = start_subscriber_dispatcher(
-            subscriber,
+            JetStreamNatsMessageProvider::new(subscriber).await?,
             handler_subscribers,
             self.state.clone(),
             self.max_concurrent_tasks,
@@ -167,10 +277,44 @@ impl<S: Clone + 'static + Send, R: 'static + Send> NatsDispatcher<NatsPayload, N
 
         Ok(())
     }
+
+    fn build_consumer_handlers(
+        &self,
+    ) -> HashMap<String, Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Sync + Send>> {
+        let handler_consumers = self
+            .consumers
+            .handlers
+            .iter()
+            .map(|(x, y)| (x.clone(), y.clone()))
+            .collect::<HashMap<String, Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>>();
+        handler_consumers
+    }
+
+    fn build_subscriber_handlers(
+        &self,
+    ) -> HashMap<String, Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Sync + Send>>>
+    {
+        let handler_subscribers = self
+            .subscribers
+            .handlers
+            .iter()
+            .into_group_map_by(|x| x.0.clone())
+            .iter()
+            .map(|x| (x.0.clone(), x.1.iter().map(|x| x.1.clone()).collect::<Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>>()))
+            .collect::<HashMap<
+                String,
+                Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>,
+            >>();
+        handler_subscribers
+    }
 }
 
-pub fn start_subscriber_dispatcher<S: Clone + Send + 'static, R: Send + 'static>(
-    consumer: PullConsumer,
+pub fn start_subscriber_dispatcher<
+    Mp: NatsMessageProvider + Send + 'static,
+    S: Clone + Send + 'static,
+    R: IntoNatsResponse + Send + 'static,
+>(
+    mut message_provider: Mp,
     handler_consumers: HashMap<
         String,
         Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>,
@@ -179,34 +323,23 @@ pub fn start_subscriber_dispatcher<S: Clone + Send + 'static, R: Send + 'static>
     max_concurrent_tasks: usize,
 ) -> JoinHandle<bool> {
     let handle = tokio::spawn(async move {
-        let mut msg_iter = match consumer.messages().await {
-            Ok(x) => x,
-            Err(x) => {
-                log::error!("Error during creation of the message stream: {}", x);
-                return false;
-            }
-        };
+        // let mut msg_iter = match consumer.messages().await {
+        //     Ok(x) => x,
+        //     Err(x) => {
+        //         log::error!("Error during creation of the message stream: {}", x);
+        //         return false;
+        //     }
+        // };
         let mut join_set = tokio::task::JoinSet::<Response<R>>::new();
 
         loop {
-            let async_nats::jetstream::Message {
-                message:
-                    async_nats::Message {
-                        subject,
-                        payload,
-                        reply,
-                        ..
-                    },
-                context,
-            } = match msg_iter.next().await {
-                Some(x) => match x {
-                    Ok(x) => x,
-                    Err(e) => {
-                        log::error!("Error in recieved message: {}", e);
-                        continue;
-                    }
-                },
-                None => return true,
+            let (subject, reply, payload, acker) = match message_provider.get_nats_message().await {
+                Ok(Some(x)) => x,
+                Ok(None) => todo!("hm, not really shure when this is supposed to happen..."),
+                Err(e) => {
+                    log::error!("Error in recieved message: {}", e);
+                    continue;
+                }
             };
 
             let subject = subject.as_str();
@@ -239,7 +372,7 @@ pub fn start_subscriber_dispatcher<S: Clone + Send + 'static, R: Send + 'static>
 
             // we ack all of the subjects at once, retransmissions of whole subjects might lead to more problems
             // because every subscriber would need to handle retransmission logic
-            match ack(&context, &reply).await {
+            match acker.ack_message().await {
                 Ok(_) => {}
                 // we probably want to retry the ack if we got to this point
                 Err(x) => {
@@ -280,8 +413,12 @@ pub fn start_subscriber_dispatcher<S: Clone + Send + 'static, R: Send + 'static>
     handle
 }
 
-pub fn start_consumer_dispatcher<S: Clone + Send + 'static, R: Send + 'static>(
-    consumer: PullConsumer,
+pub fn start_consumer_dispatcher<
+    Mp: NatsMessageProvider + Send + 'static,
+    S: Clone + Send + 'static,
+    R: IntoNatsResponse + Send + 'static,
+>(
+    mut message_provider: Mp,
     handler_consumers: HashMap<
         String,
         Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>,
@@ -290,35 +427,16 @@ pub fn start_consumer_dispatcher<S: Clone + Send + 'static, R: Send + 'static>(
     max_concurrent_tasks: usize,
 ) -> JoinHandle<bool> {
     let handle = tokio::spawn(async move {
-        let mut msg_iter = match consumer.messages().await {
-            Ok(x) => x,
-            Err(x) => {
-                log::error!("Error during creation of the message stream: {}", x);
-                return false;
-            }
-        };
-
         let mut join_set = tokio::task::JoinSet::<Response<R>>::new();
 
         loop {
-            let async_nats::jetstream::Message {
-                message:
-                    async_nats::Message {
-                        subject,
-                        payload,
-                        reply,
-                        ..
-                    },
-                context,
-            } = match msg_iter.next().await {
-                Some(x) => match x {
-                    Ok(x) => x,
-                    Err(e) => {
-                        log::error!("Error in recieved message: {}", e);
-                        continue;
-                    }
-                },
-                None => return true,
+            let (subject, reply, payload, acker) = match message_provider.get_nats_message().await {
+                Ok(Some(x)) => x,
+                Ok(None) => todo!("hm, not really shure when this is supposed to happen..."),
+                Err(e) => {
+                    log::error!("Error in recieved message: {}", e);
+                    continue;
+                }
             };
 
             let subject = subject.as_str();
@@ -345,7 +463,7 @@ pub fn start_consumer_dispatcher<S: Clone + Send + 'static, R: Send + 'static>(
                     )
                     .await;
                 // this might be a problem if this panics before the ack is send, e.g. the email is send, then it crashes.
-                match ack(&context, &reply).await {
+                match acker.ack_message().await {
                     Ok(_) => {}
                     // we probably want to retry the ack if we got to this point
                     Err(x) => {

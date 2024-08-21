@@ -35,13 +35,13 @@ async fn simple_consumer(I(config): I<Config>, raw: Raw) {
 async fn simple_subscriber_one(I(config): I<Config>, raw: Raw) {
     println!(stringify!(simple_subscriber_one));
     println!("config value: {} message payload\n{}", config.msg, raw.0);
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 async fn simple_subscriber_two(I(config): I<Config>, raw: Raw) {
     println!(stringify!(simple_subscriber_two));
     println!("config value: {} message payload\n{}", config.msg, raw.0);
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 async fn simple_subscriber_three(I(config): I<Config>, raw: Raw) {
@@ -100,7 +100,7 @@ async fn main() -> Result<(), color_eyre::Report> {
                 })
                 .build_service_provider_arc(),
         ),
-        "EVENTS".into(),
+        "EVENTS1".into(),
         subscriber_name,
     )
     .start()
