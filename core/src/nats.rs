@@ -13,7 +13,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 
-use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, Response};
+use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response};
 
 #[derive(Clone)]
 pub struct NatsPayload {
@@ -55,15 +55,20 @@ impl IntoNatsResponse for () {
     }
 }
 
-// hm this conflicts with the implementation for (), very funny...
-// #[async_trait::async_trait]
-// impl<T: Send + Into<bytes::Bytes>> IntoNatsResponse for T {
-//     async fn into_nats_response(self) -> NatsResponse {
-//         NatsResponse {
-//             data: Some(self.into()),
-//         }
-//     }
-// }
+#[async_trait::async_trait]
+impl IntoNatsResponse for String {
+    async fn into_nats_response(self) -> NatsResponse {
+        NatsResponse {
+            data: Some(self.into()),
+        }
+    }
+}
+#[async_trait::async_trait]
+impl IntoNatsResponse for bytes::Bytes {
+    async fn into_nats_response(self) -> NatsResponse {
+        NatsResponse { data: Some(self) }
+    }
+}
 
 #[async_trait::async_trait]
 trait NatsMessageProvider {
@@ -78,16 +83,11 @@ trait NatsMessageProvider {
         )>,
         eyre::Report,
     >;
-    async fn reply_nats_message(
-        &self,
-        reply: Subject,
-        payload: bytes::Bytes,
-    ) -> Result<(), eyre::Report>;
 }
 
 #[async_trait::async_trait]
 trait NatsMessageAcker: Send + Sync {
-    async fn ack_message(&self) -> Result<(), eyre::Report>;
+    async fn ack_message(&self, payload: Option<bytes::Bytes>) -> Result<(), eyre::Report>;
 }
 
 struct JetStreamNatsMessageAcker {
@@ -97,9 +97,18 @@ struct JetStreamNatsMessageAcker {
 
 #[async_trait::async_trait]
 impl NatsMessageAcker for JetStreamNatsMessageAcker {
-    async fn ack_message(&self) -> Result<(), eyre::Report> {
-        ack(&self.context, &self.reply).await?;
-        Ok(())
+    async fn ack_message(&self, payload: Option<bytes::Bytes>) -> Result<(), eyre::Report> {
+        if let Some(ref reply) = &self.reply {
+            self.context
+                .publish(
+                    reply.clone(),
+                    if let Some(x) = payload { x } else { "".into() },
+                )
+                .await?;
+            return Ok(());
+        } else {
+            bail!("No reply subject, not a JetStream message");
+        }
     }
 }
 
@@ -149,14 +158,6 @@ impl NatsMessageProvider for JetStreamNatsMessageProvider {
             payload,
             Box::new(JetStreamNatsMessageAcker { reply, context }),
         )))
-    }
-
-    async fn reply_nats_message(
-        &self,
-        reply: Subject,
-        payload: bytes::Bytes,
-    ) -> Result<(), eyre::Report> {
-        todo!()
     }
 }
 
@@ -372,7 +373,7 @@ pub fn start_subscriber_dispatcher<
 
             // we ack all of the subjects at once, retransmissions of whole subjects might lead to more problems
             // because every subscriber would need to handle retransmission logic
-            match acker.ack_message().await {
+            match acker.ack_message(None).await {
                 Ok(_) => {}
                 // we probably want to retry the ack if we got to this point
                 Err(x) => {
@@ -427,10 +428,11 @@ pub fn start_consumer_dispatcher<
     max_concurrent_tasks: usize,
 ) -> JoinHandle<bool> {
     let handle = tokio::spawn(async move {
-        let mut join_set = tokio::task::JoinSet::<Response<R>>::new();
+        let mut join_set = tokio::task::JoinSet::<()>::new();
 
         loop {
-            let (subject, reply, payload, acker) = match message_provider.get_nats_message().await {
+            let (subject, _reply, payload, acker) = match message_provider.get_nats_message().await
+            {
                 Ok(Some(x)) => x,
                 Ok(None) => todo!("hm, not really shure when this is supposed to happen..."),
                 Err(e) => {
@@ -462,19 +464,20 @@ pub fn start_consumer_dispatcher<
                         state,
                     )
                     .await;
-                // this might be a problem if this panics before the ack is send, e.g. the email is send, then it crashes.
-                match acker.ack_message().await {
+
+                let payload = if let Some(x) = res.payload {
+                    x.into_nats_response().await.data
+                } else {
+                    None
+                };
+
+                match acker.ack_message(payload).await {
                     Ok(_) => {}
                     // we probably want to retry the ack if we got to this point
                     Err(x) => {
-                        log::error!(
-                            "Error during acking (message id: {:?}) of the message: {}",
-                            reply,
-                            x
-                        );
+                        log::error!("Error during acking of the message: {}", x);
                     }
                 }
-                res
             });
 
             // perform garbage collection, everything after this while is running probably
@@ -482,7 +485,7 @@ pub fn start_consumer_dispatcher<
             loop {
                 while let Some(x) = join_set.try_join_next() {
                     // r.f.u maybe we can do something with the reponse in the future
-                    let _rest = match x {
+                    match x {
                         Ok(x) => x,
                         Err(x) => {
                             log::error!("Something went wrong during the join the process: {}", x);
