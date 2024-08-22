@@ -13,7 +13,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 
-use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response};
+use crate::handler::{HanderCall, HandlerRegistry, HandlerRequest, Response};
 
 #[derive(Clone)]
 pub struct NatsPayload {
