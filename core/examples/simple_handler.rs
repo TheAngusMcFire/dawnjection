@@ -21,13 +21,6 @@ pub struct Config {
     msg: &'static str,
 }
 
-// todo remove at some point
-// trait implementations:
-// trait from other crates can only be implemented for types of this crate
-// trait implementations for other crates can only be done within the crate its defined
-
-// retrieves data from the Message metadata and the state
-
 // This example can be used to deserialize some object into some message
 pub struct Mp<T>(String, PhantomData<T>);
 #[async_trait::async_trait]

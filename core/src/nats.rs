@@ -251,9 +251,9 @@ impl<S: Clone + 'static + Send, R: IntoNatsResponse + 'static + Send>
 
         log::info!("created subscriber with name: {}", self.subscriber_name);
 
-        let handler_consumers = self.build_consumer_handlers();
+        let handler_consumers = build_consumer_handlers(&self.consumers);
 
-        let handler_subscribers = self.build_subscriber_handlers();
+        let handler_subscribers = build_subscriber_handlers(&self.subscribers);
 
         let consuemer_join_handle = start_consumer_dispatcher(
             JetStreamNatsMessageProvider::new(consumer).await?,
@@ -278,25 +278,24 @@ impl<S: Clone + 'static + Send, R: IntoNatsResponse + 'static + Send>
 
         Ok(())
     }
+}
 
-    fn build_consumer_handlers(
-        &self,
-    ) -> HashMap<String, Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Sync + Send>> {
-        let handler_consumers = self
-            .consumers
+fn build_consumer_handlers<S: Send + 'static, R: Send + 'static>(
+    consumers: &HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
+) -> HashMap<String, Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Sync + Send>> {
+    let handler_consumers = consumers
             .handlers
             .iter()
             .map(|(x, y)| (x.clone(), y.clone()))
             .collect::<HashMap<String, Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>>();
-        handler_consumers
-    }
+    handler_consumers
+}
 
-    fn build_subscriber_handlers(
-        &self,
-    ) -> HashMap<String, Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Sync + Send>>>
-    {
-        let handler_subscribers = self
-            .subscribers
+fn build_subscriber_handlers<S: Send + 'static, R: Send + 'static>(
+    consumers: &HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
+) -> HashMap<String, Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Sync + Send>>> {
+    let handler_subscribers = 
+            consumers
             .handlers
             .iter()
             .into_group_map_by(|x| x.0.clone())
@@ -306,8 +305,7 @@ impl<S: Clone + 'static + Send, R: IntoNatsResponse + 'static + Send>
                 String,
                 Vec<Arc<dyn HanderCall<NatsPayload, NatsMetadata, S, R> + Send + Sync>>,
             >>();
-        handler_subscribers
-    }
+    handler_subscribers
 }
 
 fn start_subscriber_dispatcher<

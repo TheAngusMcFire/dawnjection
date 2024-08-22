@@ -28,13 +28,13 @@ async fn main() -> Result<(), color_eyre::Report> {
 async fn publish() -> Result<(), color_eyre::Report> {
     {
         let cnt = Arc::new(AtomicUsize::new(0));
-        for n in 0..1 {
+        for _ in 0..1 {
             let acnt = cnt.clone();
             tokio::spawn(async move {
                 let connection_string = std::env::var("NATS_CONNECTION_STRING").unwrap();
                 let client = async_nats::connect(connection_string).await.unwrap();
                 let js = jetstream::new(client);
-                for i in 0..10000000 {
+                for _ in 0..10000000 {
                     let ret = js
                         .publish(
                             "topic1".to_string(),
@@ -45,7 +45,7 @@ async fn publish() -> Result<(), color_eyre::Report> {
                         )
                         .await
                         .unwrap();
-                    let res = ret.await.unwrap();
+                    let _res = ret.await.unwrap();
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                 }
             });
