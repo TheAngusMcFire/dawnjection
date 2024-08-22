@@ -310,7 +310,7 @@ impl<S: Clone + 'static + Send, R: IntoNatsResponse + 'static + Send>
     }
 }
 
-pub fn start_subscriber_dispatcher<
+fn start_subscriber_dispatcher<
     Mp: NatsMessageProvider + Send + 'static,
     S: Clone + Send + 'static,
     R: IntoNatsResponse + Send + 'static,
@@ -324,13 +324,6 @@ pub fn start_subscriber_dispatcher<
     max_concurrent_tasks: usize,
 ) -> JoinHandle<bool> {
     let handle = tokio::spawn(async move {
-        // let mut msg_iter = match consumer.messages().await {
-        //     Ok(x) => x,
-        //     Err(x) => {
-        //         log::error!("Error during creation of the message stream: {}", x);
-        //         return false;
-        //     }
-        // };
         let mut join_set = tokio::task::JoinSet::<Response<R>>::new();
 
         loop {
@@ -414,7 +407,7 @@ pub fn start_subscriber_dispatcher<
     handle
 }
 
-pub fn start_consumer_dispatcher<
+fn start_consumer_dispatcher<
     Mp: NatsMessageProvider + Send + 'static,
     S: Clone + Send + 'static,
     R: IntoNatsResponse + Send + 'static,
