@@ -103,7 +103,7 @@ async fn main() -> Result<(), color_eyre::Report> {
         "EVENTS1".into(),
         subscriber_name,
     )
-    .start()
+    .start_nats_dispatching()
     .await?;
 
     Ok(())

@@ -14,6 +14,7 @@ async fn main() -> Result<(), color_eyre::Report> {
 
     match arg.as_str() {
         "p" => publish().await,
+        "pj" => publish_js().await,
         "r" => request().await,
         "s" => subscribe().await,
         "ss" => example().await,
@@ -26,6 +27,35 @@ async fn main() -> Result<(), color_eyre::Report> {
 }
 
 async fn publish() -> Result<(), color_eyre::Report> {
+    {
+        let cnt = Arc::new(AtomicUsize::new(0));
+        for _ in 0..1 {
+            let acnt = cnt.clone();
+            tokio::spawn(async move {
+                let connection_string = std::env::var("NATS_CONNECTION_STRING").unwrap();
+                let client = async_nats::connect(connection_string).await.unwrap();
+                for _ in 0..10000000 {
+                    client
+                        .publish(
+                            "topic1".to_string(),
+                            bytes::Bytes::from(format!(
+                                "this is the message: {}",
+                                acnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                            )),
+                        )
+                        .await
+                        .unwrap();
+                    // let _res = ret.await.unwrap();
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                }
+            });
+        }
+        tokio::time::sleep(Duration::from_secs(600)).await;
+        Ok(())
+    }
+}
+
+async fn publish_js() -> Result<(), color_eyre::Report> {
     {
         let cnt = Arc::new(AtomicUsize::new(0));
         for _ in 0..1 {
@@ -110,7 +140,7 @@ async fn example() -> Result<(), color_eyre::Report> {
 
     let client = async_nats::connect(nats_url).await?;
 
-    // let mut requests = client.subscribe("greet.*").await.unwrap();
+    let mut requests = client.subscribe("greet.*").await.unwrap();
 
     // tokio::spawn({
     //     let client = client.clone();

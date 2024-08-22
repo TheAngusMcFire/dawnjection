@@ -4,7 +4,7 @@
 
 use async_nats::{
     jetstream::{self, consumer::PullConsumer, Context},
-    Subject,
+    Subject, Subscriber,
 };
 use eyre::bail;
 use itertools::{self, Itertools};
@@ -186,33 +186,11 @@ impl<S: Clone + 'static + Send, R: IntoNatsResponse + 'static + Send>
         }
     }
 
-    pub async fn start(self) -> Result<(), eyre::Report> {
-        self.dispatch_loop().await?;
-        Ok(())
-    }
-
-    async fn dispatch_loop(self) -> Result<(), eyre::Report> {
+    pub async fn start_jetstrem_dispatching(self) -> Result<(), eyre::Report> {
         // consumer name is unique
         // but the subscriber name must be different for every instance of the
-        let mut all_subjects = Vec::<String>::new();
-        let mut subscriber_subjects: Vec<String> = self
-            .subscribers
-            .handlers
-            .iter()
-            .map(|x| x.0.clone())
-            .collect();
-        let mut consumer_subjects: Vec<String> = self
-            .consumers
-            .handlers
-            .iter()
-            .map(|x| x.0.clone())
-            .collect();
-
-        subscriber_subjects.dedup();
-        consumer_subjects.dedup();
-        all_subjects.extend_from_slice(&subscriber_subjects);
-        all_subjects.extend_from_slice(&consumer_subjects);
-        all_subjects.dedup();
+        let (all_subjects, subscriber_subjects, consumer_subjects) = 
+            extract_unique_subjects(&self.consumers, &self.subscribers);
 
         log::info!("all subjects:        {:?}", all_subjects);
         log::info!("subscriber_subjects: {:?}", subscriber_subjects);
@@ -278,7 +256,119 @@ impl<S: Clone + 'static + Send, R: IntoNatsResponse + 'static + Send>
 
         Ok(())
     }
+    
+    pub async fn start_nats_dispatching(self) -> Result<(), eyre::Report> {
+        // consumer name is unique
+        // but the subscriber name must be different for every instance of the
+        let (all_subjects, subscriber_subjects, consumer_subjects) = 
+            extract_unique_subjects(&self.consumers, &self.subscribers);
+
+        log::info!("all subjects:        {:?}", all_subjects);
+        log::info!("subscriber_subjects: {:?}", subscriber_subjects);
+        log::info!("conumer_subjects:    {:?}", consumer_subjects);
+
+        let client = async_nats::connect(&self.connection_string).await?;
+        // > subscribes to all of the messages, i really do not think this is good
+        let mut requests = client.subscribe(">").await.unwrap();
+
+        let mut sub = Vec::<futures_util::stream::Peekable<Subscriber>>::new();
+
+        for s in all_subjects {
+            sub.push(client.subscribe(s).await?.peekable());
+        }
+
+        for x in &sub {
+        }
+
+        while let Some(x) = requests.next() .await {
+            dbg!(x);
+        }
+
+        // let jetstream = jetstream::new(client);
+
+        // let stream = jetstream
+        //     .get_or_create_stream(jetstream::stream::Config {
+        //         name: self.stream_name.clone(),
+        //         retention: jetstream::stream::RetentionPolicy::Interest,
+        //         subjects: all_subjects,
+        //         ..Default::default()
+        //     })
+        //     .await?;
+
+        // log::info!("created stream");
+
+        // let consumer: PullConsumer = stream
+        //     .create_consumer(jetstream::consumer::pull::Config {
+        //         durable_name: Some("consumer".to_string()),
+        //         filter_subjects: consumer_subjects,
+        //         ..Default::default()
+        //     })
+        //     .await?;
+
+        // log::info!("created consumer whith name: consumer");
+
+        // let subscriber: PullConsumer = stream
+        //     .create_consumer(jetstream::consumer::pull::Config {
+        //         durable_name: Some(self.subscriber_name.clone()),
+        //         ..Default::default()
+        //     })
+        //     .await?;
+
+        // log::info!("created subscriber with name: {}", self.subscriber_name);
+
+        // let handler_consumers = build_consumer_handlers(&self.consumers);
+
+        // let handler_subscribers = build_subscriber_handlers(&self.subscribers);
+
+        // let consuemer_join_handle = start_consumer_dispatcher(
+        //     JetStreamNatsMessageProvider::new(consumer).await?,
+        //     handler_consumers,
+        //     self.state.clone(),
+        //     self.max_concurrent_tasks,
+        // );
+
+        // let subscriber_join_handle = start_subscriber_dispatcher(
+        //     JetStreamNatsMessageProvider::new(subscriber).await?,
+        //     handler_subscribers,
+        //     self.state.clone(),
+        //     self.max_concurrent_tasks,
+        // );
+
+        // let result = tokio::join!(consuemer_join_handle, subscriber_join_handle);
+
+        // log::error!(
+        //     "Error during joining of the main dispatch loops: {:?}",
+        //     result
+        // );
+
+        Ok(())
+    }
+
 }
+
+fn extract_unique_subjects<S: Send + 'static, R: Send + 'static>(
+            consumers: &HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
+            subscribers: &HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let mut all_subjects = Vec::<String>::new();
+        let mut subscriber_subjects: Vec<String> = subscribers
+            .handlers
+            .iter()
+            .map(|x| x.0.clone())
+            .collect();
+        let mut consumer_subjects: Vec<String> = consumers
+            .handlers
+            .iter()
+            .map(|x| x.0.clone())
+            .collect();
+
+        subscriber_subjects.dedup();
+        consumer_subjects.dedup();
+        all_subjects.extend_from_slice(&subscriber_subjects);
+        all_subjects.extend_from_slice(&consumer_subjects);
+        all_subjects.dedup();
+        (all_subjects, subscriber_subjects, consumer_subjects)
+    }
 
 fn build_consumer_handlers<S: Send + 'static, R: Send + 'static>(
     consumers: &HandlerRegistry<NatsPayload, NatsMetadata, S, R>,
