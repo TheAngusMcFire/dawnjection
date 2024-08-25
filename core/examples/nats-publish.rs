@@ -35,16 +35,20 @@ async fn publish() -> Result<(), color_eyre::Report> {
                 let connection_string = std::env::var("NATS_CONNECTION_STRING").unwrap();
                 let client = async_nats::connect(connection_string).await.unwrap();
                 for _ in 0..10000000 {
-                    client
-                        .publish(
-                            "topic1".to_string(),
-                            bytes::Bytes::from(format!(
+                    let request = async_nats::Request::new()
+                        .payload(
+                            format!(
                                 "this is the message: {}",
                                 acnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                            )),
+                            )
+                            .into(),
                         )
+                        .timeout(Some(Duration::from_secs(600)));
+                    let response = client
+                        .send_request("simple_consumer", request)
                         .await
                         .unwrap();
+                    dbg!(&response);
                     // let _res = ret.await.unwrap();
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                 }

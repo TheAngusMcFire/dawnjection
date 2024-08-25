@@ -16,8 +16,8 @@ pub struct Config {
 
 pub struct Raw(String);
 #[async_trait::async_trait]
-impl FromRequestBody<ServiceProviderContainer, NatsPayload, NatsMetadata, ()> for Raw {
-    type Rejection = Result<(), eyre::Report>;
+impl FromRequestBody<ServiceProviderContainer, NatsPayload, NatsMetadata, String> for Raw {
+    type Rejection = Result<String, eyre::Report>;
     async fn from_request(
         req: HandlerRequest<NatsPayload, NatsMetadata>,
         _state: &ServiceProviderContainer,
@@ -27,14 +27,16 @@ impl FromRequestBody<ServiceProviderContainer, NatsPayload, NatsMetadata, ()> fo
     }
 }
 
-async fn simple_consumer(I(config): I<Config>, raw: Raw) {
+async fn simple_consumer(I(config): I<Config>, raw: Raw) -> String {
     println!(stringify!(simple_consumer));
     println!("config value: {} message payload\n{}", config.msg, raw.0);
+    "this is the response other".into()
 }
 
-async fn simple_subscriber_one(I(config): I<Config>, raw: Raw) {
+async fn simple_subscriber_one(I(config): I<Config>, raw: Raw) -> String {
     println!(stringify!(simple_subscriber_one));
     println!("config value: {} message payload\n{}", config.msg, raw.0);
+    "this is some other response".into()
     // tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
@@ -74,17 +76,19 @@ async fn main() -> Result<(), color_eyre::Report> {
     let subscriber_name = std::env::var("NATS_SUBSCRIBER_NAME")?;
 
     let consumer_registry =
-        HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, ()>::default()
+        HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, String>::default()
+            .register_with_name("simple_consumer", simple_subscriber_one)
             .register(simple_consumer);
 
     let subscriber_registry =
-        HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, ()>::default()
+        HandlerRegistry::<NatsPayload, NatsMetadata, ServiceProviderContainer, String>::default()
             .register_with_name("topic1", simple_subscriber_one)
-            .register_with_name("topic1", simple_subscriber_two)
-            .register_with_name("topic3", simple_subscriber_three)
-            .register_with_name("topic4", simple_subscriber_four)
-            .register_with_name("topic5", simple_subscriber_five)
-            .register_with_name("topic2", simple_subscriber_other_topic);
+            // .register_with_name("topic1", simple_subscriber_two)
+            // .register_with_name("topic3", simple_subscriber_three)
+            // .register_with_name("topic4", simple_subscriber_four)
+            // .register_with_name("topic5", simple_subscriber_five)
+            // .register_with_name("topic2", simple_subscriber_other_topic)
+    ;
 
     log::info!("Start the nats dispatcher");
 
