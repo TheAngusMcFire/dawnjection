@@ -1,7 +1,9 @@
-use std::sync::atomic::AtomicU32;
-use dawnjection::{ServiceCollection,IServiceProvider};
-use dawnjection_rocket::{I,R};
+use dawnjection::{
+    rocket::{I, R},
+    IServiceProvider, ServiceCollection,
+};
 use rocket::{get, launch, routes};
+use std::sync::atomic::AtomicU32;
 
 #[get("/")]
 fn hello(msg: R<String>, number: I<u32>) -> String {
@@ -22,6 +24,6 @@ fn rocket() -> _ {
         });
 
     rocket::build()
-    .manage(sc.build_service_provider())
-    .mount("/", routes![hello])
+        .manage(sc.build_service_provider())
+        .mount("/", routes![hello])
 }

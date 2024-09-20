@@ -1,27 +1,81 @@
 use std::any::{Any, TypeId};
 use std::clone::Clone;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+#[cfg(feature = "axum")]
+pub mod axum;
+pub mod handler;
+#[cfg(feature = "nats")]
+pub mod nats;
+#[cfg(feature = "rocket")]
+pub mod rocket;
+
+pub struct I<T>(pub T);
+
+impl<T> I<T> {
+    pub fn get(self) -> T {
+        self.0
+    }
+}
+
+#[derive(Clone)]
+pub struct ServiceProviderContainer(pub Arc<ServiceProvider>);
+
+pub trait ServiceProviderAccess {
+    fn get_sp_arc(&self) -> &Arc<ServiceProvider>;
+}
+
+impl ServiceProviderAccess for ServiceProviderContainer {
+    fn get_sp_arc(&self) -> &Arc<ServiceProvider> {
+        &self.0
+    }
+}
+
+pub struct R<T: 'static> {
+    provider: ServiceProviderContainer,
+    phantom: PhantomData<T>,
+}
+
+impl<T> R<T> {
+    pub fn new(provider: ServiceProviderContainer) -> Self {
+        Self {
+            provider,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn get(&self) -> &T {
+        self.provider.0.try_get_ref::<T>().unwrap_or_else(|| {
+            panic!(
+                "Expected registered type in Dependency Injection: {}",
+                std::any::type_name::<T>()
+            )
+        })
+    }
+
+    pub fn try_get(&self) -> Option<&T> {
+        self.provider.0.try_get_ref()
+    }
+}
 
 pub type Report = eyre::Report;
 pub type BoxFuture<'r, T = Result<(), Report>> = futures::future::BoxFuture<'r, T>;
 #[allow(dead_code)]
 pub struct HandlerEntry {
-    pub handler:  fn(sp: Arc<ServiceProvider>) -> BoxFuture<'static>,
-    pub name: String
+    pub handler: fn(sp: Arc<ServiceProvider>) -> BoxFuture<'static>,
+    pub name: String,
 }
 
 struct ServiceFactory<T> {
     pub factory: fn(&ServiceProvider) -> Option<T>,
 }
 
-
 struct CloneServiceFactory<T> {
     pub factory: fn(&CloneServiceFactory<T>) -> T,
-    pub obj: T
+    pub obj: T,
 }
-
 
 enum ServiceDescriptor {
     // get references to only this object instance, but just read only
@@ -36,65 +90,104 @@ enum ServiceDescriptor {
     Take(Box<dyn Any + Sync + Send>),
 }
 
-
 #[derive(Default)]
 pub struct ServiceCollection {
     map: HashMap<std::any::TypeId, ServiceDescriptor>,
 }
 
 impl ServiceCollection {
-
     fn check_if_already_registered<T: 'static>(&self) {
-        if self.map.contains_key(&TypeId::of::<T>()) { panic!() }
+        if self.map.contains_key(&TypeId::of::<T>()) {
+            panic!()
+        }
     }
-    pub fn reg_cloneable<T: Sync + Send>(mut self, instance: T) -> Self where T: Clone + 'static {
+    pub fn reg_cloneable<T>(mut self, instance: T) -> Self
+    where
+        T: Clone + 'static,
+        T: Sync + Send,
+    {
         self.check_if_already_registered::<T>();
 
         let csf = CloneServiceFactory {
             obj: instance,
-            factory: |x| {
-                x.obj.clone()
-            }
+            factory: |x| x.obj.clone(),
         };
 
-        self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Clone(Box::new(csf)));
+        self.map.insert(
+            std::any::TypeId::of::<T>(),
+            ServiceDescriptor::Clone(Box::new(csf)),
+        );
         self
     }
 
-    pub fn reg_singleton<T:  Sync + Send>(mut self, instance: T) -> Self where T: 'static {
+    pub fn reg_singleton<T>(mut self, instance: T) -> Self
+    where
+        T: 'static,
+        T: Sync + Send,
+    {
         self.check_if_already_registered::<T>();
-        self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Singleton(Box::new(instance)));
+        self.map.insert(
+            std::any::TypeId::of::<T>(),
+            ServiceDescriptor::Singleton(Box::new(instance)),
+        );
         self
     }
 
-    pub fn reg_mutable_singleton<T:  Sync + Send>(mut self, instance: T) -> Self where T: 'static {
+    pub fn reg_mutable_singleton<T>(mut self, instance: T) -> Self
+    where
+        T: 'static,
+        T: Sync + Send,
+    {
         self.check_if_already_registered::<T>();
-        self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::MutableSingleton(Box::new(Arc::new(Mutex::new(instance)))));
+        self.map.insert(
+            std::any::TypeId::of::<T>(),
+            ServiceDescriptor::MutableSingleton(Box::new(Arc::new(Mutex::new(instance)))),
+        );
         self
     }
 
-    pub fn reg_factory<T: 'static + Sync + Send>(mut self, factory: fn(&ServiceProvider) -> Option<T>) -> Self {
+    pub fn reg_factory<T>(mut self, factory: fn(&ServiceProvider) -> Option<T>) -> Self
+    where
+        T: 'static + Sync + Send,
+    {
         self.check_if_already_registered::<T>();
-        self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Factory(Box::new(ServiceFactory { factory })));
+        self.map.insert(
+            std::any::TypeId::of::<T>(),
+            ServiceDescriptor::Factory(Box::new(ServiceFactory { factory })),
+        );
         self
     }
 
-    pub fn reg_takeable<T:  Sync + Send>(mut self, instance: T) -> Self where T: 'static {
+    pub fn reg_takeable<T>(mut self, instance: T) -> Self
+    where
+        T: 'static,
+        T: Sync + Send,
+    {
         self.check_if_already_registered::<T>();
-        self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Take(Box::new(instance)));
+        self.map.insert(
+            std::any::TypeId::of::<T>(),
+            ServiceDescriptor::Take(Box::new(instance)),
+        );
         self
     }
 
-    pub fn register_takeable<T:  Sync + Send>(&mut self, instance: T) where T: 'static {
+    pub fn register_takeable<T>(&mut self, instance: T)
+    where
+        T: 'static,
+        T: Sync + Send,
+    {
         self.check_if_already_registered::<T>();
-        self.map.insert(std::any::TypeId::of::<T>(), ServiceDescriptor::Take(Box::new(instance)));
+        self.map.insert(
+            std::any::TypeId::of::<T>(),
+            ServiceDescriptor::Take(Box::new(instance)),
+        );
     }
 
     pub fn build_service_provider(self) -> ServiceProvider {
         ServiceProvider {
             map: Arc::new(self.map),
             /* root provider does not have a scope */
-            scope_context: None
+            scope_context: None,
         }
     }
 
@@ -102,78 +195,65 @@ impl ServiceCollection {
         Arc::new(self.build_service_provider())
     }
 
-
-    pub (crate) fn get_service_map(self) -> HashMap<std::any::TypeId, ServiceDescriptor> {
+    pub(crate) fn get_service_map(self) -> HashMap<std::any::TypeId, ServiceDescriptor> {
         self.map
     }
-
 }
 
-
 pub trait IServiceProvider {
-    /* one shot function to move entry from di scope */
+    /// one shot function to move entry from di scope
     fn try_take<T: 'static>(&self) -> Option<T>;
     fn try_get<T: 'static>(&self) -> Option<T>;
     fn try_get_ref<T: 'static>(&self) -> Option<&T>;
     fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>>;
 }
 
+#[derive(Clone)]
 pub struct ServiceProvider {
     map: Arc<HashMap<std::any::TypeId, ServiceDescriptor>>,
-    scope_context: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>
+    scope_context: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>,
 }
 
 impl ServiceProvider {
     pub fn create_scope(&self, scope_seed: Option<ServiceCollection>) -> Self {
         let scope_ctx = match scope_seed {
             Some(x) => x.get_service_map(),
-            None => HashMap::new()
+            None => HashMap::new(),
         };
 
         ServiceProvider {
             map: self.map.clone(),
-            scope_context: Some(Arc::new(Mutex::new(scope_ctx)))
+            scope_context: Some(Arc::new(Mutex::new(scope_ctx))),
         }
     }
 
     pub fn create_scope_arc(&self, scope_seed: Option<ServiceCollection>) -> Arc<Self> {
         self.create_scope(scope_seed).into()
     }
-}
-
-impl IServiceProvider for ServiceProvider {
 
     fn try_take<T: 'static>(&self) -> Option<T> {
-
         self.scope_context.as_ref()?;
 
         let mut scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
-        
-        match scope_map.get(&TypeId::of::<T>()) {
-            Some(ServiceDescriptor::Take(_)) => {},
-            _ => return None
-        }
-        
+
         match scope_map.remove(&TypeId::of::<T>()) {
-            Some(ServiceDescriptor::Take(taken)) => {
-                match taken.downcast::<T>() {
-                    Ok(x) => Some(*x),
-                    _ => None
-                }
-            }
-            _ => None
+            Some(ServiceDescriptor::Take(taken)) => match taken.downcast::<T>() {
+                Ok(x) => Some(*x),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
     fn try_get<T: 'static>(&self) -> Option<T> {
         let def = match self.map.get(&TypeId::of::<T>()) {
-            Some(ServiceDescriptor::Factory(x)) => 
-            x.downcast_ref::<ServiceFactory<T>>()
+            Some(ServiceDescriptor::Factory(x)) => x
+                .downcast_ref::<ServiceFactory<T>>()
                 .and_then(|fun| (fun.factory)(self)),
-            Some(ServiceDescriptor::Clone(x)) => 
-            x.downcast_ref::<CloneServiceFactory<T>>()
+            Some(ServiceDescriptor::Clone(x)) => x
+                .downcast_ref::<CloneServiceFactory<T>>()
                 .map(|fun| (fun.factory)(fun)),
-            _ => None
+            _ => None,
         };
 
         if def.is_some() {
@@ -189,13 +269,13 @@ impl IServiceProvider for ServiceProvider {
         {
             let scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
             match scope_map.get(&TypeId::of::<T>()) {
-                Some(ServiceDescriptor::Factory(x)) => 
-                x.downcast_ref::<ServiceFactory<T>>()
+                Some(ServiceDescriptor::Factory(x)) => x
+                    .downcast_ref::<ServiceFactory<T>>()
                     .and_then(|fun| (fun.factory)(self)),
-                Some(ServiceDescriptor::Clone(x)) => 
-                x.downcast_ref::<CloneServiceFactory<T>>()
+                Some(ServiceDescriptor::Clone(x)) => x
+                    .downcast_ref::<CloneServiceFactory<T>>()
                     .map(|fun| (fun.factory)(fun)),
-                _ => None
+                _ => None,
             }
         }
     }
@@ -204,35 +284,55 @@ impl IServiceProvider for ServiceProvider {
         match self.map.get(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::Clone(x)) => x.downcast_ref::<T>(),
             Some(ServiceDescriptor::Singleton(x)) => x.downcast_ref::<T>(),
-            _ => None
+            _ => None,
         }
     }
 
     fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>> {
         match self.map.get(&TypeId::of::<T>()) {
-            Some(ServiceDescriptor::MutableSingleton(x)) => 
-            if let Some(x) = x.downcast_ref::<Arc<Mutex<T>>>() {
-                // not sure what the correct handling of this is
-                match x.lock() {
-                    Ok(x) => Some(x),
-                    _ => None
+            Some(ServiceDescriptor::MutableSingleton(x)) => {
+                if let Some(x) = x.downcast_ref::<Arc<Mutex<T>>>() {
+                    // not sure what the correct handling of this is
+                    match x.lock() {
+                        Ok(x) => Some(x),
+                        _ => None,
+                    }
+                } else {
+                    None
                 }
-            } else { None }
-            _ => None
+            }
+            _ => None,
         }
+    }
+}
+
+// this is legacy
+impl IServiceProvider for ServiceProvider {
+    fn try_take<T: 'static>(&self) -> Option<T> {
+        self.try_take()
+    }
+
+    fn try_get<T: 'static>(&self) -> Option<T> {
+        self.try_get()
+    }
+
+    fn try_get_ref<T: 'static>(&self) -> Option<&T> {
+        self.try_get_ref()
+    }
+
+    fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>> {
+        self.try_get_mut()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{IServiceProvider, ServiceCollection};
+    use crate::ServiceCollection;
 
     #[test]
     fn basic_clone() {
         let collection = ServiceCollection::default();
-        let pro = collection
-            .reg_cloneable(42_i32)
-            .build_service_provider();
+        let pro = collection.reg_cloneable(42_i32).build_service_provider();
         assert_eq!(pro.try_get::<i32>(), Some(42));
     }
 
@@ -241,17 +341,18 @@ mod tests {
         let pro = ServiceCollection::default()
             .reg_mutable_singleton(42_u32)
             .reg_factory(|x| {
-            let int = x.try_get_mut::<u32>().unwrap();
-            Some((*int) as i32)
-        }).build_service_provider();
+                let int = x.try_get_mut::<u32>().unwrap();
+                Some((*int) as i32)
+            })
+            .build_service_provider();
         assert_eq!(pro.try_get::<i32>(), Some(42));
     }
 
     #[test]
     fn basic_singleton() {
         let pro = ServiceCollection::default()
-            .reg_singleton(42_i32
-            ).build_service_provider();
+            .reg_singleton(42_i32)
+            .build_service_provider();
         assert_eq!(pro.try_get_ref::<i32>(), Some(&42))
     }
 

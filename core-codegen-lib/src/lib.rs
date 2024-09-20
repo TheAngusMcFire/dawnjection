@@ -2,8 +2,8 @@ use proc_macro2::Ident;
 use proc_macro2::TokenStream;
 use quote::format_ident;
 use quote::quote;
-use syn::ReturnType;
 use syn::token::Async;
+use syn::ReturnType;
 use syn::{FnArg, GenericArgument, ItemFn, Pat, PathArguments, Type, TypePath};
 
 #[allow(dead_code)]
@@ -12,7 +12,7 @@ struct Argument {
     name: String,
     is_ref: bool,
     is_mut: bool,
-    ty: String
+    ty: String,
 }
 
 fn get_args_from_function(sig: &syn::Signature) -> Vec<Argument> {
@@ -27,18 +27,16 @@ fn get_args_from_function(sig: &syn::Signature) -> Vec<Argument> {
                 name = x.ident.to_string();
                 is_mut = x.mutability.is_some();
             }
-            if let Type::Path(x) = x.ty.as_ref()
-            {
+            if let Type::Path(x) = x.ty.as_ref() {
                 process_segments(&mut ty, &x)
             } else if let Type::Reference(x) = x.ty.as_ref() {
                 is_ref = true;
-                if let Type::Path(x) = x.elem.as_ref()
-                {
+                if let Type::Path(x) = x.elem.as_ref() {
                     process_segments(&mut ty, &x)
                 }
             }
         }
-        args.push(Argument{
+        args.push(Argument {
             name,
             is_ref,
             is_mut,
@@ -74,7 +72,7 @@ pub fn with_di(ast: ItemFn, for_handler: bool) -> TokenStream {
     let mut var_names = Vec::<syn::Ident>::new();
 
     let injection_vars = args.iter().enumerate().map(|(i, x)| {
-        let ty : syn::Type = syn::parse_str(&x.ty).unwrap();
+        let ty: syn::Type = syn::parse_str(&x.ty).unwrap();
         let varident = format_ident!("var{i}");
 
         let ts = if x.is_ref {
@@ -92,7 +90,6 @@ pub fn with_di(ast: ItemFn, for_handler: bool) -> TokenStream {
 
     let ret = &ast.sig.output;
 
-
     let modast = ast.clone();
     let ident = modast.sig.ident.clone();
     let f_name = format_ident!("{}", ident.to_string());
@@ -100,18 +97,38 @@ pub fn with_di(ast: ItemFn, for_handler: bool) -> TokenStream {
     let fn_await = is_async.map(|_| quote!(.await));
 
     if for_handler {
-        codegen_handler_with_di(&ast, f_name, quote!(#(#injection_vars)*), fn_await, var_names)
-    } else { 
-        codegen_with_di(is_async, &ast, f_name, f_name_new, quote!(#(#injection_vars)*), fn_await, ret, var_names)
+        codegen_handler_with_di(
+            &ast,
+            f_name,
+            quote!(#(#injection_vars)*),
+            fn_await,
+            var_names,
+        )
+    } else {
+        codegen_with_di(
+            is_async,
+            &ast,
+            f_name,
+            f_name_new,
+            quote!(#(#injection_vars)*),
+            fn_await,
+            ret,
+            var_names,
+        )
     }
 }
 
-
-fn codegen_with_di(is_async: Option<Async>, ast: &ItemFn, 
-    f_name: Ident, f_name_new: Ident, 
-    injection_vars: TokenStream, 
-    fn_await: Option<TokenStream>, ret: &ReturnType, var_names: Vec<Ident>) -> TokenStream{
-    quote!{
+fn codegen_with_di(
+    is_async: Option<Async>,
+    ast: &ItemFn,
+    f_name: Ident,
+    f_name_new: Ident,
+    injection_vars: TokenStream,
+    fn_await: Option<TokenStream>,
+    ret: &ReturnType,
+    var_names: Vec<Ident>,
+) -> TokenStream {
+    quote! {
         #[allow(dead_code)]
         #ast
         use dawnjection::IServiceProvider;
@@ -123,17 +140,20 @@ fn codegen_with_di(is_async: Option<Async>, ast: &ItemFn,
     }
 }
 
-fn codegen_handler_with_di(ast: &ItemFn, 
-    f_name: Ident, 
-    injection_vars: TokenStream, 
-    fn_await: Option<TokenStream>, var_names: Vec<Ident>) -> TokenStream{
-    quote!{
+fn codegen_handler_with_di(
+    ast: &ItemFn,
+    f_name: Ident,
+    injection_vars: TokenStream,
+    fn_await: Option<TokenStream>,
+    var_names: Vec<Ident>,
+) -> TokenStream {
+    quote! {
         #[allow(dead_code)]
         #ast
 
         #[derive(Default)]
         struct #f_name {}
-        
+
         impl #f_name {
             fn consumer_entry(self) -> dawnjection::HandlerEntry {
                 use dawnjection::IServiceProvider;
@@ -159,10 +179,16 @@ mod tests {
 
     #[test]
     fn basic_test() {
-        let ts = quote::quote!(async fn consume_some_message(mut ctx: ConsumerContext<SomeMessage, TestSegment>, cnt : &std::tst::AtomicU64<i32>, client: &tokio_postgres::Client) -> Result<(), Report> {
-            println!("this is cool");
-            Ok(())
-        });
+        let ts = quote::quote!(
+            async fn consume_some_message(
+                mut ctx: ConsumerContext<SomeMessage, TestSegment>,
+                cnt: &std::tst::AtomicU64<i32>,
+                client: &tokio_postgres::Client,
+            ) -> Result<(), Report> {
+                println!("this is cool");
+                Ok(())
+            }
+        );
 
         let ast = syn::parse2(ts).unwrap();
         let ret = crate::with_di(ast, true);

@@ -5,7 +5,49 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+axum = ["dep:axum"]
+rocket = ["dep:rocket"]
+nats = ["dep:async-nats", "dep:uuid", "dep:log", "dep:tokio"]
+default = ["nats"]
+
 [dependencies]
 dawnjection-codegen ={ path = "../core-codegen" }
+async-trait = "0.1.81"
 eyre = "0.6.8"
 futures = "0.3.28"
+
+rocket = { version="0.5", optional = true }
+axum = { version = "0.6", optional = true }
+uuid = { version = "1.10", optional = true, features = ["v4"] }
+async-nats = { version = "0.35", optional = true }
+log = { version = "0.4", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+bytes = "1.7.1"
+itertools = "0.13.0"
+futures-util = "0.3.30"
+
+[dev-dependencies]
+tokio = {version="*", features = ["full"]}
+color-eyre = "*"
+env_logger = { version = "0.11", optional = false }
+
+[[example]]
+name = "axum"
+path = "examples/axum.rs"
+required-features = ["axum"]
+
+[[example]]
+name = "rocket"
+path = "examples/rocket.rs"
+required-features = ["rocket"]
+
+[[example]]
+name = "nats"
+path = "examples/nats.rs"
+required-features = ["nats"]
+
+[[example]]
+name = "nats-publish"
+path = "examples/nats-publish.rs"
+required-features = ["nats"]
