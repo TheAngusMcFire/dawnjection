@@ -1,7 +1,4 @@
-use std::{
-    net::SocketAddr,
-    sync::{atomic::AtomicU32, Arc},
-};
+use std::sync::{atomic::AtomicU32, Arc};
 
 use axum::{response::Html, routing::get, Router};
 use dawnjection::{ServiceCollection, ServiceProviderContainer, I, R};
@@ -28,10 +25,9 @@ async fn main() {
                 .build_service_provider_arc(),
         ));
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
+    println!("listening on {}", listener.local_addr().unwrap());
+    axum::serve(listener, app).await.unwrap();
 }
