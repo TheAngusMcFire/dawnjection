@@ -144,7 +144,7 @@ async fn example() -> Result<(), color_eyre::Report> {
 
     let client = async_nats::connect(nats_url).await?;
 
-    let mut requests = client.subscribe("greet.*").await.unwrap();
+    let requests = client.subscribe("greet.*").await.unwrap();
 
     // tokio::spawn({
     //     let client = client.clone();

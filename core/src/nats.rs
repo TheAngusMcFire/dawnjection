@@ -6,16 +6,15 @@ use async_nats::{
     jetstream::{self, consumer::PullConsumer, Context},
     Client, Message, Subject,
 };
-use core::panic;
 use eyre::bail;
 use itertools::{self, Itertools};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::{JoinSet};
 
 use crate::handler::{
-    FromRequestBody, HanderCall, HandlerEndpoint, HandlerRegistry, HandlerRequest, IntoResponse,
+    HanderCall, HandlerRegistry, HandlerRequest, IntoResponse,
     Response,
 };
 
