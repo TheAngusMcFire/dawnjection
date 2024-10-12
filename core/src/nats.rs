@@ -13,8 +13,14 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use futures::StreamExt;
 use tokio::task::JoinSet;
 
-use crate::handler::{
-    FromRequestBody, HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response,
+pub type NatsHandlerRegistry =
+    HandlerRegistry<NatsPayload, NatsMetadata, ServiceProviderContainer, NatsResponse>;
+
+use crate::{
+    handler::{
+        FromRequestBody, HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response,
+    },
+    ServiceProviderContainer,
 };
 
 #[derive(Clone)]
