@@ -64,6 +64,13 @@ impl IntoNatsResponse for () {
 }
 
 #[async_trait::async_trait]
+impl IntoNatsResponse for NatsResponse {
+    async fn into_nats_response(self) -> NatsResponse {
+        self
+    }
+}
+
+#[async_trait::async_trait]
 impl IntoNatsResponse for String {
     async fn into_nats_response(self) -> NatsResponse {
         NatsResponse {
