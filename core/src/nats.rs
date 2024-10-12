@@ -85,6 +85,12 @@ impl IntoResponse<NatsResponse> for eyre::Report {
     }
 }
 
+impl From<()> for NatsResponse {
+    fn from(_value: ()) -> Self {
+        Self { data: None }
+    }
+}
+
 #[cfg(feature = "serde_json_requests")]
 #[async_trait::async_trait]
 impl<S, T> FromRequestBody<S, NatsPayload, NatsMetadata, NatsResponse> for T
