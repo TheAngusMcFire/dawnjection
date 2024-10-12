@@ -11,11 +11,10 @@ use itertools::{self, Itertools};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use tokio::task::{JoinSet};
+use tokio::task::JoinSet;
 
 use crate::handler::{
-    HanderCall, HandlerRegistry, HandlerRequest, IntoResponse,
-    Response,
+    FromRequestBody, HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response,
 };
 
 #[derive(Clone)]
@@ -101,7 +100,7 @@ where
 
     async fn from_request(
         req: HandlerRequest<NatsPayload, NatsMetadata>,
-        state: &S,
+        _state: &S,
     ) -> Result<Self, Self::Rejection> {
         return match serde_json::from_slice::<T>(&req.payload.data.slice(..)) {
             Ok(value) => Ok(value),
