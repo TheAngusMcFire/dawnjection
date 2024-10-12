@@ -14,7 +14,10 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use futures::StreamExt;
 use tokio::task::{JoinHandle, JoinSet};
 
-use crate::handler::{HanderCall, HandlerEndpoint, HandlerRegistry, HandlerRequest, Response};
+use crate::handler::{
+    FromRequestBody, HanderCall, HandlerEndpoint, HandlerRegistry, HandlerRequest, IntoResponse,
+    Response,
+};
 
 #[derive(Clone)]
 pub struct NatsPayload {
@@ -69,6 +72,36 @@ impl IntoNatsResponse for String {
 impl IntoNatsResponse for bytes::Bytes {
     async fn into_nats_response(self) -> NatsResponse {
         NatsResponse { data: Some(self) }
+    }
+}
+
+impl IntoResponse<NatsResponse> for eyre::Report {
+    fn into_response(self) -> Response<NatsResponse> {
+        Response {
+            success: false,
+            report: Some(self),
+            payload: None,
+        }
+    }
+}
+
+#[cfg(feature = "serde_json_requests")]
+#[async_trait::async_trait]
+impl<S, T> FromRequestBody<S, NatsPayload, NatsMetadata, NatsResponse> for T
+where
+    S: Send + Sync,
+    T: serde::de::DeserializeOwned,
+{
+    type Rejection = eyre::Report;
+
+    async fn from_request(
+        req: HandlerRequest<NatsPayload, NatsMetadata>,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        return match serde_json::from_slice::<T>(&req.payload.data.slice(..)) {
+            Ok(value) => Ok(value),
+            Err(error) => Err(eyre::eyre!("error during object deserialisation: {error}")),
+        };
     }
 }
 
