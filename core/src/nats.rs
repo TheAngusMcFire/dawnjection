@@ -19,6 +19,7 @@ pub type NatsHandlerRegistry =
 use crate::{
     handler::{
         FromRequestBody, HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response,
+        ResponseErrorScope,
     },
     ServiceProviderContainer,
 };
@@ -98,6 +99,8 @@ impl IntoNatsResponse for bytes::Bytes {
 impl IntoResponse<NatsResponse> for eyre::Report {
     fn into_response(self) -> Response<NatsResponse> {
         Response {
+            // todo I really hope this impl is only used in Preparation scopes
+            error_scope: Some(crate::handler::ResponseErrorScope::Preparation),
             success: false,
             report: Some(self),
             payload: None,
@@ -614,12 +617,15 @@ async fn start_consumer_dispatcher<
             }
         };
 
-        let subject = subject.as_str();
-        log::debug!("Recieved new message for the subject: {}", subject);
-        let handler = match handler_consumers.get(subject) {
+        let subject_str = subject.as_str();
+        log::debug!("Recieved new message for the subject: {}", subject_str);
+        let handler = match handler_consumers.get(subject_str) {
             Some(x) => x.clone(),
             None => {
-                log::error!("There is no registered handler for subject: {}", subject);
+                log::error!(
+                    "There is no registered handler for subject: {}",
+                    subject_str
+                );
                 continue;
             }
         };
@@ -629,6 +635,7 @@ async fn start_consumer_dispatcher<
         let state = state.clone();
 
         join_set.spawn(async move {
+            let subject = subject;
             let res = handler
                 .call(
                     HandlerRequest {
@@ -638,6 +645,33 @@ async fn start_consumer_dispatcher<
                     state,
                 )
                 .await;
+
+            let (print_error, scope, err) = match (res.success, res.error_scope, res.report) {
+                (false, None, Some(e)) => (true, "handling", Some(e)),
+                (false, None, None) => (true, "handling", None),
+                (false, Some(ResponseErrorScope::Preparation), Some(e)) => {
+                    (true, "preparation", Some(e))
+                }
+                (false, Some(ResponseErrorScope::Preparation), None) => (true, "preparation", None),
+                (false, Some(ResponseErrorScope::Execution), Some(e)) => {
+                    (true, "execution", Some(e))
+                }
+                (false, Some(ResponseErrorScope::Execution), None) => (true, "execution", None),
+                _ => (false, "", None),
+            };
+
+            if print_error {
+                log::error!(
+                    "Error during {} of the request with topic: {} with message: {}",
+                    scope,
+                    subject.as_str(),
+                    if let Some(x) = err {
+                        format!("{}", x)
+                    } else {
+                        "no-message".into()
+                    }
+                );
+            }
 
             // todo error handling, check the status and report
             let payload = if let Some(x) = res.payload {
