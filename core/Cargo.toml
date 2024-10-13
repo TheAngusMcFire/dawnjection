@@ -9,8 +9,9 @@ edition = "2021"
 axum = ["dep:axum"]
 rocket = ["dep:rocket"]
 serde_json_requests = ["dep:serde", "serde_json"]
+nats_client = ["dep:async-nats", "serde", "serde_json"]
 nats = ["dep:async-nats", "dep:uuid", "dep:log", "dep:tokio"]
-default = ["nats"]
+default = ["nats", "nats_client"]
 serde = ["dep:serde"]
 serde_json = ["dep:serde_json"]
 

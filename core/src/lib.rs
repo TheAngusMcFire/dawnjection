@@ -9,6 +9,8 @@ pub mod axum;
 pub mod handler;
 #[cfg(feature = "nats")]
 pub mod nats;
+#[cfg(feature = "nats_client")]
+pub mod nats_client;
 #[cfg(feature = "rocket")]
 pub mod rocket;
 
