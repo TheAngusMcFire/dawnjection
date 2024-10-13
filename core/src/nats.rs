@@ -33,6 +33,15 @@ pub struct NatsResponse {
     pub data: Option<bytes::Bytes>,
 }
 
+impl NatsResponse {
+    #[cfg(feature = "serde_json_requests")]
+    pub fn form_struct<T: serde::Serialize>(value: &T) -> Result<Self, eyre::Report> {
+        Ok(NatsResponse {
+            data: Some(serde_json::to_vec(value)?.into()),
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct NatsMetadata {}
 
