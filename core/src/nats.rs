@@ -570,6 +570,7 @@ async fn start_subscriber_dispatcher<
                         continue;
                     }
                 };
+                // todo error handling, check the status and report
             }
 
             // if there are more active tasks in the queue, we wait until there is space
@@ -637,6 +638,7 @@ async fn start_consumer_dispatcher<
                 )
                 .await;
 
+            // todo error handling, check the status and report
             let payload = if let Some(x) = res.payload {
                 x.into_nats_response().await.data
             } else {
