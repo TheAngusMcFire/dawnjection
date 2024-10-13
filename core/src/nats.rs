@@ -615,6 +615,7 @@ async fn start_consumer_dispatcher<
         };
 
         let subject = subject.as_str();
+        log::debug!("Recieved new message for the subject: {}", subject);
         let handler = match handler_consumers.get(subject) {
             Some(x) => x.clone(),
             None => {
