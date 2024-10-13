@@ -566,14 +566,14 @@ async fn start_subscriber_dispatcher<
         loop {
             while let Some(x) = join_set.try_join_next() {
                 // r.f.u maybe we can do something with the reponse in the future
-                let _rest = match x {
+                let res = match x {
                     Ok(x) => x,
                     Err(x) => {
                         log::error!("Something went wrong during the join the process: {}", x);
                         continue;
                     }
                 };
-                // todo error handling, check the status and report
+                print_error(res.success, res.error_scope, res.report, "unknown-subject");
             }
 
             // if there are more active tasks in the queue, we wait until there is space
@@ -587,8 +587,6 @@ async fn start_subscriber_dispatcher<
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
-    // });
-    // handle
 }
 
 async fn start_consumer_dispatcher<
@@ -646,32 +644,7 @@ async fn start_consumer_dispatcher<
                 )
                 .await;
 
-            let (print_error, scope, err) = match (res.success, res.error_scope, res.report) {
-                (false, None, Some(e)) => (true, "handling", Some(e)),
-                (false, None, None) => (true, "handling", None),
-                (false, Some(ResponseErrorScope::Preparation), Some(e)) => {
-                    (true, "preparation", Some(e))
-                }
-                (false, Some(ResponseErrorScope::Preparation), None) => (true, "preparation", None),
-                (false, Some(ResponseErrorScope::Execution), Some(e)) => {
-                    (true, "execution", Some(e))
-                }
-                (false, Some(ResponseErrorScope::Execution), None) => (true, "execution", None),
-                _ => (false, "", None),
-            };
-
-            if print_error {
-                log::error!(
-                    "Error during {} of the request with topic: {} with message: {}",
-                    scope,
-                    subject.as_str(),
-                    if let Some(x) = err {
-                        format!("{}", x)
-                    } else {
-                        "no-message".into()
-                    }
-                );
-            }
+            print_error(res.success, res.error_scope, res.report, subject.as_str());
 
             // todo error handling, check the status and report
             let payload = if let Some(x) = res.payload {
@@ -680,6 +653,7 @@ async fn start_consumer_dispatcher<
                 None
             };
 
+            // acking in this case is more like replying
             match acker.ack_message(payload).await {
                 Ok(_) => {}
                 // we probably want to retry the ack if we got to this point
@@ -717,6 +691,36 @@ async fn start_consumer_dispatcher<
     // });
 
     // handle
+}
+
+fn print_error(
+    success: bool,
+    error_scope: Option<ResponseErrorScope>,
+    report: Option<eyre::Report>,
+    subject: &str,
+) {
+    let (print_error, scope, err) = match (success, error_scope, report) {
+        (false, None, Some(e)) => (true, "handling", Some(e)),
+        (false, None, None) => (true, "handling", None),
+        (false, Some(ResponseErrorScope::Preparation), Some(e)) => (true, "preparation", Some(e)),
+        (false, Some(ResponseErrorScope::Preparation), None) => (true, "preparation", None),
+        (false, Some(ResponseErrorScope::Execution), Some(e)) => (true, "execution", Some(e)),
+        (false, Some(ResponseErrorScope::Execution), None) => (true, "execution", None),
+        _ => (false, "", None),
+    };
+
+    if print_error {
+        log::error!(
+            "Error during {} of the request with topic: {} with message: {}",
+            scope,
+            subject,
+            if let Some(x) = err {
+                format!("{}", x)
+            } else {
+                "no-message".into()
+            }
+        );
+    }
 }
 
 pub async fn ack(
