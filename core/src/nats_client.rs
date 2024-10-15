@@ -31,4 +31,14 @@ impl NatsClient {
         let resp = serde_json::from_slice::<Resp>(&msg.payload)?;
         Ok(resp)
     }
+
+    pub async fn publish<Sub: ToSubject, Req: serde::Serialize>(
+        &self,
+        subject: Sub,
+        value: &Req,
+    ) -> Result<(), eyre::Report> {
+        let bytes = serde_json::to_vec(value)?;
+        self.client.publish(subject, bytes.into()).await?;
+        Ok(())
+    }
 }
