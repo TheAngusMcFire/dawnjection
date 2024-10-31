@@ -11,9 +11,10 @@ rocket = ["dep:rocket"]
 serde_json_requests = ["dep:serde", "serde_json"]
 nats_client = ["dep:async-nats", "serde", "serde_json"]
 nats = ["dep:async-nats", "dep:uuid", "dep:log", "dep:tokio"]
-default = ["nats", "nats_client"]
+default = ["nats", "nats_client","nats_client_binary"]
 serde = ["dep:serde"]
 serde_json = ["dep:serde_json"]
+nats_client_binary = ["dep:serde-binary"]
 
 [dependencies]
 dawnjection-codegen ={ path = "../core-codegen" }
@@ -32,6 +33,7 @@ itertools = "0.13.0"
 futures-util = "0.3.30"
 serde = { version = "1.0.210", optional = true }
 serde_json = { version = "1.0.128", optional = true }
+serde-binary = { version = "0.5.0", optional = true }
 
 [dev-dependencies]
 tokio = {version="*", features = ["full"]}

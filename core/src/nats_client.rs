@@ -41,4 +41,34 @@ impl NatsClient {
         self.client.publish(subject, bytes.into()).await?;
         Ok(())
     }
+
+    #[cfg(feature = "nats_client_binary")]
+    pub async fn request_bin<
+        Sub: ToSubject,
+        Req: serde::Serialize,
+        Resp: serde::de::DeserializeOwned,
+    >(
+        &self,
+        subject: Sub,
+        value: &Req,
+    ) -> Result<Resp, eyre::Report> {
+        let bytes = serde_binary::to_vec(value, serde_binary::binary_stream::Endian::Little)?;
+        let msg = self.client.request(subject, bytes.into()).await?;
+        let resp = serde_binary::from_slice::<Resp>(
+            &msg.payload,
+            serde_binary::binary_stream::Endian::Little,
+        )?;
+        Ok(resp)
+    }
+
+    #[cfg(feature = "nats_client_binary")]
+    pub async fn publish_bin<Sub: ToSubject, Req: serde::Serialize>(
+        &self,
+        subject: Sub,
+        value: &Req,
+    ) -> Result<(), eyre::Report> {
+        let bytes = serde_binary::to_vec(value, serde_binary::binary_stream::Endian::Little)?;
+        self.client.publish(subject, bytes.into()).await?;
+        Ok(())
+    }
 }
