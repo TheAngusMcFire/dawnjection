@@ -1,8 +1,7 @@
 use std::{marker::PhantomData, pin::Pin, sync::Arc};
 
-use futures::Future;
-
 use crate::{ServiceProviderAccess, ServiceProviderContainer, I};
+use futures::Future;
 
 #[rustfmt::skip]
 macro_rules! all_the_tuples {
