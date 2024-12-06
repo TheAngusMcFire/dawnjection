@@ -9,6 +9,8 @@ pub mod axum;
 pub mod handler;
 #[cfg(feature = "nats")]
 pub mod nats;
+#[cfg(feature = "nats_client")]
+pub mod nats_client;
 #[cfg(feature = "rocket")]
 pub mod rocket;
 
@@ -231,7 +233,7 @@ impl ServiceProvider {
         self.create_scope(scope_seed).into()
     }
 
-    fn try_take<T: 'static>(&self) -> Option<T> {
+    pub fn try_take<T: 'static>(&self) -> Option<T> {
         self.scope_context.as_ref()?;
 
         let mut scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
@@ -245,7 +247,7 @@ impl ServiceProvider {
         }
     }
 
-    fn try_get<T: 'static>(&self) -> Option<T> {
+    pub fn try_get<T: 'static>(&self) -> Option<T> {
         let def = match self.map.get(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::Factory(x)) => x
                 .downcast_ref::<ServiceFactory<T>>()
@@ -280,7 +282,7 @@ impl ServiceProvider {
         }
     }
 
-    fn try_get_ref<T: 'static>(&self) -> Option<&T> {
+    pub fn try_get_ref<T: 'static>(&self) -> Option<&T> {
         match self.map.get(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::Clone(x)) => x.downcast_ref::<T>(),
             Some(ServiceDescriptor::Singleton(x)) => x.downcast_ref::<T>(),
@@ -288,7 +290,7 @@ impl ServiceProvider {
         }
     }
 
-    fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>> {
+    pub fn try_get_mut<T: 'static>(&self) -> Option<MutexGuard<T>> {
         match self.map.get(&TypeId::of::<T>()) {
             Some(ServiceDescriptor::MutableSingleton(x)) => {
                 if let Some(x) = x.downcast_ref::<Arc<Mutex<T>>>() {

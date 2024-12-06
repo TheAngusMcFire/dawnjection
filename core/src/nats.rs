@@ -6,15 +6,23 @@ use async_nats::{
     jetstream::{self, consumer::PullConsumer, Context},
     Client, Message, Subject,
 };
-use core::panic;
 use eyre::bail;
 use itertools::{self, Itertools};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::JoinSet;
 
-use crate::handler::{HanderCall, HandlerEndpoint, HandlerRegistry, HandlerRequest, Response};
+pub type NatsHandlerRegistry =
+    HandlerRegistry<NatsPayload, NatsMetadata, ServiceProviderContainer, NatsResponse>;
+
+use crate::{
+    handler::{
+        FromRequestBody, HanderCall, HandlerRegistry, HandlerRequest, IntoResponse, Response,
+        ResponseErrorScope,
+    },
+    ServiceProviderContainer,
+};
 
 #[derive(Clone)]
 pub struct NatsPayload {
@@ -24,6 +32,15 @@ pub struct NatsPayload {
 #[derive(Clone)]
 pub struct NatsResponse {
     pub data: Option<bytes::Bytes>,
+}
+
+impl NatsResponse {
+    #[cfg(feature = "serde_json_requests")]
+    pub fn form_struct<T: serde::Serialize>(value: &T) -> Result<Self, eyre::Report> {
+        Ok(NatsResponse {
+            data: Some(serde_json::to_vec(value)?.into()),
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -57,6 +74,13 @@ impl IntoNatsResponse for () {
 }
 
 #[async_trait::async_trait]
+impl IntoNatsResponse for NatsResponse {
+    async fn into_nats_response(self) -> NatsResponse {
+        self
+    }
+}
+
+#[async_trait::async_trait]
 impl IntoNatsResponse for String {
     async fn into_nats_response(self) -> NatsResponse {
         NatsResponse {
@@ -69,6 +93,44 @@ impl IntoNatsResponse for String {
 impl IntoNatsResponse for bytes::Bytes {
     async fn into_nats_response(self) -> NatsResponse {
         NatsResponse { data: Some(self) }
+    }
+}
+
+impl IntoResponse<NatsResponse> for eyre::Report {
+    fn into_response(self) -> Response<NatsResponse> {
+        Response {
+            // todo I really hope this impl is only used in Preparation scopes
+            error_scope: Some(crate::handler::ResponseErrorScope::Preparation),
+            success: false,
+            report: Some(self),
+            payload: None,
+        }
+    }
+}
+
+impl From<()> for NatsResponse {
+    fn from(_value: ()) -> Self {
+        Self { data: None }
+    }
+}
+
+#[cfg(feature = "serde_json_requests")]
+#[async_trait::async_trait]
+impl<S, T> FromRequestBody<S, NatsPayload, NatsMetadata, NatsResponse> for T
+where
+    S: Send + Sync,
+    T: serde::de::DeserializeOwned,
+{
+    type Rejection = eyre::Report;
+
+    async fn from_request(
+        req: HandlerRequest<NatsPayload, NatsMetadata>,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        return match serde_json::from_slice::<T>(&req.payload.data.slice(..)) {
+            Ok(value) => Ok(value),
+            Err(error) => Err(eyre::eyre!("error during object deserialisation: {error}")),
+        };
     }
 }
 
@@ -504,13 +566,14 @@ async fn start_subscriber_dispatcher<
         loop {
             while let Some(x) = join_set.try_join_next() {
                 // r.f.u maybe we can do something with the reponse in the future
-                let _rest = match x {
+                let res = match x {
                     Ok(x) => x,
                     Err(x) => {
                         log::error!("Something went wrong during the join the process: {}", x);
                         continue;
                     }
                 };
+                print_error(res.success, res.error_scope, res.report, "unknown-subject");
             }
 
             // if there are more active tasks in the queue, we wait until there is space
@@ -524,8 +587,6 @@ async fn start_subscriber_dispatcher<
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
-    // });
-    // handle
 }
 
 async fn start_consumer_dispatcher<
@@ -554,11 +615,15 @@ async fn start_consumer_dispatcher<
             }
         };
 
-        let subject = subject.as_str();
-        let handler = match handler_consumers.get(subject) {
+        let subject_str = subject.as_str();
+        log::debug!("Recieved new message for the subject: {}", subject_str);
+        let handler = match handler_consumers.get(subject_str) {
             Some(x) => x.clone(),
             None => {
-                log::error!("There is no registered handler for subject: {}", subject);
+                log::error!(
+                    "There is no registered handler for subject: {}",
+                    subject_str
+                );
                 continue;
             }
         };
@@ -568,6 +633,7 @@ async fn start_consumer_dispatcher<
         let state = state.clone();
 
         join_set.spawn(async move {
+            let subject = subject;
             let res = handler
                 .call(
                     HandlerRequest {
@@ -578,12 +644,16 @@ async fn start_consumer_dispatcher<
                 )
                 .await;
 
+            print_error(res.success, res.error_scope, res.report, subject.as_str());
+
+            // todo error handling, check the status and report
             let payload = if let Some(x) = res.payload {
                 x.into_nats_response().await.data
             } else {
                 None
             };
 
+            // acking in this case is more like replying
             match acker.ack_message(payload).await {
                 Ok(_) => {}
                 // we probably want to retry the ack if we got to this point
@@ -621,6 +691,36 @@ async fn start_consumer_dispatcher<
     // });
 
     // handle
+}
+
+fn print_error(
+    success: bool,
+    error_scope: Option<ResponseErrorScope>,
+    report: Option<eyre::Report>,
+    subject: &str,
+) {
+    let (print_error, scope, err) = match (success, error_scope, report) {
+        (false, None, Some(e)) => (true, "handling", Some(e)),
+        (false, None, None) => (true, "handling", None),
+        (false, Some(ResponseErrorScope::Preparation), Some(e)) => (true, "preparation", Some(e)),
+        (false, Some(ResponseErrorScope::Preparation), None) => (true, "preparation", None),
+        (false, Some(ResponseErrorScope::Execution), Some(e)) => (true, "execution", Some(e)),
+        (false, Some(ResponseErrorScope::Execution), None) => (true, "execution", None),
+        _ => (false, "", None),
+    };
+
+    if print_error {
+        log::error!(
+            "Error during {} of the request with topic: {} with message: {}",
+            scope,
+            subject,
+            if let Some(x) = err {
+                format!("{}", x)
+            } else {
+                "no-message".into()
+            }
+        );
+    }
 }
 
 pub async fn ack(

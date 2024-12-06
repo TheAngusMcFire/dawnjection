@@ -1,6 +1,6 @@
 use dawnjection::{
     rocket::{I, R},
-    IServiceProvider, ServiceCollection,
+    ServiceCollection,
 };
 use rocket::{get, launch, routes};
 use std::sync::atomic::AtomicU32;

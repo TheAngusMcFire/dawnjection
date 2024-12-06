@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use dawnjection::{IServiceProvider, ServiceCollection};
+use dawnjection::ServiceCollection;
 
 #[derive(Debug, Default, Clone)]
 struct SomeService {

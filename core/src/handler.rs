@@ -199,7 +199,13 @@ pub trait FromRequestBody<S, P, M, R, A = private::ViaRequest>: Sized {
     async fn from_request(req: HandlerRequest<P, M>, state: &S) -> Result<Self, Self::Rejection>;
 }
 
+pub enum ResponseErrorScope {
+    Preparation,
+    Execution,
+}
+
 pub struct Response<P> {
+    pub error_scope: Option<ResponseErrorScope>,
     pub success: bool,
     pub report: Option<eyre::Report>,
     pub payload: Option<P>,
@@ -212,6 +218,7 @@ pub trait IntoResponse<P> {
 impl<T> IntoResponse<T> for T {
     fn into_response(self) -> Response<T> {
         Response {
+            error_scope: None,
             success: true,
             report: None,
             payload: Some(self),
@@ -223,11 +230,14 @@ impl<T> IntoResponse<T> for Result<T, eyre::Report> {
     fn into_response(self) -> Response<T> {
         match self {
             Ok(p) => Response {
+                error_scope: None,
                 success: true,
                 report: None,
                 payload: Some(p),
             },
             Err(x) => Response {
+                // todo I really hope this extension is only used in execution scopes...
+                error_scope: Some(ResponseErrorScope::Execution),
                 success: false,
                 report: Some(x),
                 payload: None,
