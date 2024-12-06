@@ -10,7 +10,13 @@ pub mod handler;
 #[cfg(feature = "rocket")]
 pub mod rocket;
 
-pub use dawnjection_codegen::with_di;
+pub use dawnjection_codegen::*;
+
+pub trait FromDi {
+    fn from_di(sp: &ServiceProvider) -> Option<Self>
+    where
+        Self: Sized;
+}
 
 pub struct I<T>(pub T);
 

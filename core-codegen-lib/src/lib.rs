@@ -6,6 +6,8 @@ use syn::token::Async;
 use syn::ReturnType;
 use syn::{FnArg, GenericArgument, ItemFn, Pat, PathArguments, Type, TypePath};
 
+pub mod struct_from_di;
+
 #[allow(dead_code)]
 #[derive(Debug)]
 struct Argument {
