@@ -213,6 +213,14 @@ impl ServiceCollection {
         }
     }
 
+    /// build service provider which only contains a scope, no body
+    pub fn build_scoped_service_provider(self) -> ServiceProvider {
+        ServiceProvider {
+            map: Default::default(),
+            scope_context: Some(Arc::new(Mutex::new(self.map))),
+        }
+    }
+
     pub fn build_service_provider_arc(self) -> Arc<ServiceProvider> {
         Arc::new(self.build_service_provider())
     }
