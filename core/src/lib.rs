@@ -96,6 +96,22 @@ enum ServiceDescriptor {
     Take(Box<dyn Any + Sync + Send>),
 }
 
+impl std::fmt::Debug for ServiceDescriptor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                ServiceDescriptor::Singleton(_) => "singleton",
+                ServiceDescriptor::MutableSingleton(_) => "mutable-singleton",
+                ServiceDescriptor::Clone(_) => "clone",
+                ServiceDescriptor::Factory(_) => "factory",
+                ServiceDescriptor::Take(_) => "take",
+            }
+        )
+    }
+}
+
 #[derive(Default)]
 pub struct ServiceCollection {
     map: HashMap<std::any::TypeId, ServiceDescriptor>,
@@ -220,6 +236,26 @@ pub struct ServiceProvider {
     scope_context: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>,
 }
 
+impl std::fmt::Debug for ServiceProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "\nroot:")?;
+        for m in self.map.iter() {
+            writeln!(f, "    TypeId: {:?} Desc: {:?}", &m.0, m.1)?;
+        }
+
+        writeln!(f, "scope:")?;
+
+        if let Some(sc) = &self.scope_context {
+            let lock = sc.lock().unwrap();
+            for m in lock.iter() {
+                writeln!(f, "    TypeId: {:?} Desc: {:?}", &m.0, m.1)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl ServiceProvider {
     pub fn create_scope(&self, scope_seed: Option<ServiceCollection>) -> Self {
         let scope_ctx = match scope_seed {
@@ -239,20 +275,26 @@ impl ServiceProvider {
 
     pub fn try_take<T: 'static>(&self) -> Option<T> {
         self.scope_context.as_ref()?;
+        let type_id = TypeId::of::<T>();
 
         let mut scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
 
-        match scope_map.remove(&TypeId::of::<T>()) {
+        match scope_map.remove(&type_id) {
             Some(ServiceDescriptor::Take(taken)) => match taken.downcast::<T>() {
                 Ok(x) => Some(*x),
                 _ => None,
             },
+            Some(x) => {
+                scope_map.insert(type_id, x);
+                None
+            }
             _ => None,
         }
     }
 
     pub fn try_get<T: 'static>(&self) -> Option<T> {
-        let def = match self.map.get(&TypeId::of::<T>()) {
+        let req_type = &TypeId::of::<T>();
+        let def = match self.map.get(req_type) {
             Some(ServiceDescriptor::Factory(x)) => x
                 .downcast_ref::<ServiceFactory<T>>()
                 .and_then(|fun| (fun.factory)(self)),
@@ -266,7 +308,9 @@ impl ServiceProvider {
             return def;
         }
 
-        self.scope_context.as_ref()?;
+        if self.scope_context.is_none() {
+            return None;
+        }
 
         if let Some(x) = self.try_take() {
             return Some(x);
@@ -274,7 +318,7 @@ impl ServiceProvider {
 
         {
             let scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
-            match scope_map.get(&TypeId::of::<T>()) {
+            match scope_map.get(req_type) {
                 Some(ServiceDescriptor::Factory(x)) => x
                     .downcast_ref::<ServiceFactory<T>>()
                     .and_then(|fun| (fun.factory)(self)),
@@ -308,6 +352,50 @@ impl ServiceProvider {
                 }
             }
             _ => None,
+        }
+    }
+
+    pub fn take<T: 'static>(&self) -> eyre::Result<T> {
+        let type_name = std::any::type_name::<T>();
+        match self.try_take() {
+            Some(x) => Ok(x),
+            None => eyre::bail!(
+                "cannot take type \"{}\" out of sevice provider because it could not be found",
+                type_name
+            ),
+        }
+    }
+
+    pub fn get<T: 'static>(&self) -> eyre::Result<T> {
+        let type_name = std::any::type_name::<T>();
+        match self.try_get() {
+            Some(x) => Ok(x),
+            None => eyre::bail!(
+                "cannot get type \"{}\" out of sevice provider because it could not be found",
+                type_name
+            ),
+        }
+    }
+
+    pub fn get_ref<T: 'static>(&self) -> eyre::Result<&T> {
+        let type_name = std::any::type_name::<T>();
+        match self.try_get_ref() {
+            Some(x) => Ok(x),
+            None => eyre::bail!(
+                "cannot get_ref type \"{}\" out of sevice provider because it could not be found",
+                type_name
+            ),
+        }
+    }
+
+    pub fn get_mut<T: 'static>(&self) -> eyre::Result<MutexGuard<T>> {
+        let type_name = std::any::type_name::<T>();
+        match self.try_get_mut() {
+            Some(x) => Ok(x),
+            None => eyre::bail!(
+                "cannot get_mut type \"{}\" out of sevice provider because it could not be found",
+                type_name
+            ),
         }
     }
 }
@@ -375,6 +463,17 @@ mod tests {
 
         let val = pro.try_get_mut::<i32>().unwrap();
         assert_eq!(*val, 43)
+    }
+
+    #[test]
+    fn scope_clone_test() {
+        let sp = ServiceCollection::default()
+            .reg_cloneable(24)
+            .build_service_provider();
+        let ss = sp.create_scope(Some(
+            ServiceCollection::default().reg_cloneable("test".to_string()),
+        ));
+        ss.try_get::<String>().unwrap();
     }
 
     #[test]
