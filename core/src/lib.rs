@@ -209,15 +209,28 @@ impl ServiceCollection {
         ServiceProvider {
             map: Arc::new(self.map),
             /* root provider does not have a scope */
+            scope_context_mut: None,
             scope_context: None,
         }
     }
 
     /// build service provider which only contains a scope, no body
     pub fn build_scoped_service_provider(self) -> ServiceProvider {
+        let mut map_mut: HashMap<std::any::TypeId, ServiceDescriptor> = Default::default();
+        let mut map: HashMap<std::any::TypeId, ServiceDescriptor> = Default::default();
+
+        for (ty, sd) in self.map {
+            if matches!(sd, ServiceDescriptor::Take(_)) {
+                map_mut.insert(ty, sd);
+            } else {
+                map.insert(ty, sd);
+            }
+        }
+
         ServiceProvider {
             map: Default::default(),
-            scope_context: Some(Arc::new(Mutex::new(self.map))),
+            scope_context_mut: Some(Arc::new(Mutex::new(map_mut))),
+            scope_context: Some(Arc::new(map)),
         }
     }
 
@@ -241,7 +254,8 @@ pub trait IServiceProvider {
 #[derive(Clone)]
 pub struct ServiceProvider {
     map: Arc<HashMap<std::any::TypeId, ServiceDescriptor>>,
-    scope_context: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>,
+    scope_context_mut: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>,
+    scope_context: Option<Arc<HashMap<std::any::TypeId, ServiceDescriptor>>>,
 }
 
 impl std::fmt::Debug for ServiceProvider {
@@ -253,7 +267,7 @@ impl std::fmt::Debug for ServiceProvider {
 
         writeln!(f, "scope:")?;
 
-        if let Some(sc) = &self.scope_context {
+        if let Some(sc) = &self.scope_context_mut {
             let lock = sc.lock().unwrap();
             for m in lock.iter() {
                 writeln!(f, "    TypeId: {:?} Desc: {:?}", &m.0, m.1)?;
@@ -266,14 +280,28 @@ impl std::fmt::Debug for ServiceProvider {
 
 impl ServiceProvider {
     pub fn create_scope(&self, scope_seed: Option<ServiceCollection>) -> Self {
-        let scope_ctx = match scope_seed {
-            Some(x) => x.get_service_map(),
-            None => HashMap::new(),
-        };
+        if let Some(service_map) = scope_seed.map(|x| x.get_service_map()) {
+            let mut map_mut: HashMap<std::any::TypeId, ServiceDescriptor> = Default::default();
+            let mut map: HashMap<std::any::TypeId, ServiceDescriptor> = Default::default();
 
-        ServiceProvider {
-            map: self.map.clone(),
-            scope_context: Some(Arc::new(Mutex::new(scope_ctx))),
+            for (ty, sd) in service_map {
+                if matches!(sd, ServiceDescriptor::Take(_)) {
+                    map_mut.insert(ty, sd);
+                } else {
+                    map.insert(ty, sd);
+                }
+            }
+            ServiceProvider {
+                map: self.map.clone(),
+                scope_context_mut: Some(Arc::new(Mutex::new(map_mut))),
+                scope_context: Some(Arc::new(map)),
+            }
+        } else {
+            ServiceProvider {
+                map: self.map.clone(),
+                scope_context_mut: None,
+                scope_context: None,
+            }
         }
     }
 
@@ -282,10 +310,10 @@ impl ServiceProvider {
     }
 
     pub fn try_take<T: 'static>(&self) -> Option<T> {
-        self.scope_context.as_ref()?;
+        self.scope_context_mut.as_ref()?;
         let type_id = TypeId::of::<T>();
 
-        let mut scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
+        let mut scope_map = self.scope_context_mut.as_ref().unwrap().lock().unwrap();
 
         match scope_map.remove(&type_id) {
             Some(ServiceDescriptor::Take(taken)) => match taken.downcast::<T>() {
@@ -316,17 +344,8 @@ impl ServiceProvider {
             return def;
         }
 
-        if self.scope_context.is_none() {
-            return None;
-        }
-
-        if let Some(x) = self.try_take() {
-            return Some(x);
-        }
-
-        {
-            let scope_map = self.scope_context.as_ref().unwrap().lock().unwrap();
-            match scope_map.get(req_type) {
+        if let Some(scope_map) = &self.scope_context {
+            let svc = match scope_map.get(req_type) {
                 Some(ServiceDescriptor::Factory(x)) => x
                     .downcast_ref::<ServiceFactory<T>>()
                     .and_then(|fun| (fun.factory)(self)),
@@ -334,8 +353,14 @@ impl ServiceProvider {
                     .downcast_ref::<CloneServiceFactory<T>>()
                     .map(|fun| (fun.factory)(fun)),
                 _ => None,
+            };
+
+            if svc.is_some() {
+                return svc;
             }
         }
+
+        self.try_take()
     }
 
     pub fn try_get_ref<T: 'static>(&self) -> Option<&T> {
@@ -505,5 +530,21 @@ mod tests {
         let some_string = scope_sp.try_get::<String>();
         assert_eq!(some_string, Some(test_string.to_string()));
         assert_eq!(scope_sp.try_take(), Some(1234u64));
+    }
+
+    #[test]
+    fn scoped_factory_test() {
+        let sc = ServiceCollection::default()
+            .reg_factory(|x| Some(x.try_get::<u32>().unwrap() as u64))
+            .reg_cloneable(0u32);
+        sc.build_scoped_service_provider().try_get::<u64>().unwrap();
+    }
+
+    #[test]
+    fn scoped_take_in_factory_test() {
+        let sc = ServiceCollection::default()
+            .reg_factory(|x| Some(x.try_get::<u32>().unwrap() as u64))
+            .reg_takeable(0u32);
+        sc.build_scoped_service_provider().try_get::<u64>().unwrap();
     }
 }
