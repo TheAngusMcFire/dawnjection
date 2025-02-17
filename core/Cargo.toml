@@ -1,6 +1,6 @@
 [package]
 name = "dawnjection"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,6 +9,7 @@ edition = "2021"
 default = []
 axum = ["dep:axum"]
 rocket = ["dep:rocket"]
+dawnflow = ["dep:dawnflow"]
 
 [dependencies]
 dawnjection-codegen ={ path = "../core-codegen" }
@@ -17,7 +18,8 @@ eyre = "0.6"
 futures = "0.3"
 
 rocket = { version="0.5", optional = true }
-axum = { version = "0.7", optional = true }
+axum = { version = "0.8", optional = true }
+dawnflow = { git = "https://github.com/TheAngusMcFire/dawnflow.git", tag = "0.1.0", optional = true }
 
 [dev-dependencies]
 tokio = {version="*", features = ["full"]}
@@ -33,3 +35,8 @@ required-features = ["axum"]
 name = "rocket"
 path = "examples/rocket.rs"
 required-features = ["rocket"]
+
+[[example]]
+name = "dawnflow"
+path = "examples/dawnflow.rs"
+required-features = ["dawnflow", "dawnflow/in_memory"]
