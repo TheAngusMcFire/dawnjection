@@ -6,9 +6,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 #[cfg(feature = "axum")]
 pub mod axum;
-pub mod handler;
+
 #[cfg(feature = "rocket")]
 pub mod rocket;
+
+#[cfg(feature = "dawnflow")]
+pub mod dawnflow;
 
 pub use dawnjection_codegen::*;
 
