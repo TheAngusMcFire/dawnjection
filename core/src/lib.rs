@@ -86,7 +86,7 @@ struct CloneServiceFactory<T> {
     pub obj: T,
 }
 
-enum ServiceDescriptor {
+pub enum ServiceDescriptor {
     // get references to only this object instance, but just read only
     Singleton(Box<dyn Any + Sync + Send>),
     // get access to one single object instance but also writeable
@@ -196,7 +196,7 @@ impl ServiceCollection {
         self
     }
 
-    pub fn register_takeable<T>(&mut self, instance: T)
+    pub fn register_takeable<T>(mut self, instance: T) -> Self
     where
         T: 'static,
         T: Sync + Send,
@@ -206,6 +206,12 @@ impl ServiceCollection {
             std::any::TypeId::of::<T>(),
             ServiceDescriptor::Take(Box::new(instance)),
         );
+        self
+    }
+
+    pub fn register_service_descriptor(mut self, id: TypeId, sd: ServiceDescriptor) -> Self {
+        self.map.insert(id, sd);
+        self
     }
 
     pub fn build_service_provider(self) -> ServiceProvider {
@@ -282,6 +288,16 @@ impl std::fmt::Debug for ServiceProvider {
 }
 
 impl ServiceProvider {
+    pub fn destroy(
+        self,
+    ) -> (
+        Arc<HashMap<std::any::TypeId, ServiceDescriptor>>,
+        Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>,
+        Option<Arc<HashMap<std::any::TypeId, ServiceDescriptor>>>,
+    ) {
+        (self.map, self.scope_context_mut, self.scope_context)
+    }
+
     pub fn create_scope(&self, scope_seed: Option<ServiceCollection>) -> Self {
         if let Some(service_map) = scope_seed.map(|x| x.get_service_map()) {
             let mut map_mut: HashMap<std::any::TypeId, ServiceDescriptor> = Default::default();
