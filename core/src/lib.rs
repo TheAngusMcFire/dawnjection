@@ -298,6 +298,23 @@ impl ServiceProvider {
         (self.map, self.scope_context_mut, self.scope_context)
     }
 
+    pub fn contains_type_id(&self, id: &TypeId) -> bool {
+        if self.map.contains_key(id) {
+            return true;
+        }
+        if let Some(x) = &self.scope_context {
+            if x.contains_key(id) {
+                return true;
+            }
+        }
+        if let Some(x) = &self.scope_context_mut {
+            if x.lock().unwrap().contains_key(id) {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn create_scope(&self, scope_seed: Option<ServiceCollection>) -> Self {
         if let Some(service_map) = scope_seed.map(|x| x.get_service_map()) {
             let mut map_mut: HashMap<std::any::TypeId, ServiceDescriptor> = Default::default();
