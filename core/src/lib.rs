@@ -298,6 +298,18 @@ impl ServiceProvider {
         (self.map, self.scope_context_mut, self.scope_context)
     }
 
+    pub fn construct(
+        service_map: Arc<HashMap<std::any::TypeId, ServiceDescriptor>>,
+        scope_context_mut: Option<Arc<Mutex<HashMap<std::any::TypeId, ServiceDescriptor>>>>,
+        scope_context: Option<Arc<HashMap<std::any::TypeId, ServiceDescriptor>>>,
+    ) -> Self {
+        Self {
+            map: service_map,
+            scope_context_mut,
+            scope_context,
+        }
+    }
+
     pub fn contains_type_id(&self, id: &TypeId) -> bool {
         if self.map.contains_key(id) {
             return true;
