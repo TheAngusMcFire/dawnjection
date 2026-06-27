@@ -10,9 +10,6 @@ pub mod axum;
 #[cfg(feature = "rocket")]
 pub mod rocket;
 
-#[cfg(feature = "dawnflow")]
-pub mod dawnflow;
-
 pub use dawnjection_codegen::*;
 
 pub trait FromDi {
